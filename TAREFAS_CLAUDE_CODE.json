@@ -1,0 +1,500 @@
+{
+  "projeto": "vid-teach-guide (Vibe Class)",
+  "descricao": "Tarefas de melhoria priorizadas baseadas no relatorio de avaliacao tecnica",
+  "instrucoes_gerais": "Execute cada fase em ordem. Dentro de cada fase, execute as tarefas na ordem listada. Faca commit apos cada tarefa concluida. Rode os testes existentes (npm run test) apos cada alteracao para garantir que nada quebrou.",
+  "fases": [
+    {
+      "fase": 1,
+      "nome": "Fundacao - Impacto imediato no aluno",
+      "estimativa": "1-2 meses",
+      "tarefas": [
+        {
+          "id": "F1-T1",
+          "titulo": "Legendas em tempo real da fala do professor IA",
+          "prioridade": "CRITICA",
+          "descricao": "Criar um componente LiveCaptions que exibe a transcricao da fala do professor IA em tempo real como legendas sobrepostas ao video. O hook useOpenAIRealtime.ts ja emite eventos onTranscript e useGeminiLive.ts tambem. Basta capturar esses eventos e renderizar.",
+          "arquivos_afetados": [
+            "src/components/LiveCaptions.tsx (CRIAR)",
+            "src/components/VideoPlayer.tsx (MODIFICAR - adicionar overlay de legendas)",
+            "src/components/DirectVideoPlayer.tsx (MODIFICAR - adicionar overlay de legendas)",
+            "src/components/VoiceChat.tsx (MODIFICAR - passar transcript para o player)"
+          ],
+          "requisitos": [
+            "Exibir texto da fala da IA em tempo real como legendas na parte inferior do video",
+            "Legendas devem desaparecer 5 segundos apos a fala terminar",
+            "Botao para ativar/desativar legendas (padrao: ativado)",
+            "Fonte legivel (min 16px), fundo semi-transparente preto, texto branco",
+            "Funcionar tanto com OpenAI quanto com Gemini",
+            "Responsivo - funcionar em mobile tambem",
+            "Salvar preferencia do aluno (legendas on/off) no localStorage"
+          ],
+          "contexto_tecnico": "useOpenAIRealtime.ts tem callback onTranscript que recebe {text, isFinal}. useGeminiLive.ts tem serverContent.modelTurn.parts[].text. Ambos ja fazem STT server-side."
+        },
+        {
+          "id": "F1-T2",
+          "titulo": "Reconexao automatica de WebSocket com backoff exponencial",
+          "prioridade": "CRITICA",
+          "descricao": "Implementar reconexao automatica quando a conexao WebSocket cair, tanto para OpenAI Realtime quanto para Gemini Live. Atualmente, se a internet do aluno oscila por 2 segundos, a sessao inteira e perdida.",
+          "arquivos_afetados": [
+            "src/hooks/useOpenAIRealtime.ts (MODIFICAR)",
+            "src/hooks/useGeminiLive.ts (MODIFICAR)",
+            "src/hooks/useWebSocketReconnect.ts (CRIAR - hook reutilizavel)"
+          ],
+          "requisitos": [
+            "Criar hook useWebSocketReconnect com logica de retry: backoff exponencial (1s, 2s, 4s, 8s, max 30s)",
+            "Maximo de 5 tentativas antes de mostrar erro ao usuario",
+            "Indicador visual de status da conexao (conectado/reconectando/desconectado)",
+            "Ao reconectar, reenviar o system prompt e contexto da conversa",
+            "Nao perder o historico de conversa durante reconexao",
+            "Usar navigator.onLine e evento 'online' para detectar retorno de rede",
+            "Integrar com useNetworkStatus.ts que ja existe no projeto"
+          ],
+          "contexto_tecnico": "useOpenAIRealtime.ts usa WebSocket nativo (new WebSocket(url, protocols)). useGeminiLive.ts tambem. useNetworkStatus.ts ja existe em src/hooks/ e monitora status de rede."
+        },
+        {
+          "id": "F1-T3",
+          "titulo": "Migrar ScriptProcessor para AudioWorklet",
+          "prioridade": "ALTA",
+          "descricao": "Substituir o uso de createScriptProcessor (deprecado) por AudioWorklet em ambos os hooks de IA. O ScriptProcessor roda na main thread e causa jank. AudioWorklet roda em thread separada.",
+          "arquivos_afetados": [
+            "src/hooks/useGeminiLive.ts (MODIFICAR)",
+            "src/hooks/useOpenAIRealtime.ts (MODIFICAR)",
+            "public/audio-processor.worklet.js (CRIAR)"
+          ],
+          "requisitos": [
+            "Criar AudioWorklet processor em public/audio-processor.worklet.js",
+            "O worklet deve: capturar PCM float32, converter para int16, enviar via port.postMessage",
+            "Registrar worklet via audioContext.audioWorklet.addModule()",
+            "Manter os mesmos filtros de audio (high-pass 85Hz, low-pass 8kHz, compressor) como nodes antes do worklet",
+            "Fallback para ScriptProcessor em browsers que nao suportam AudioWorklet (Safari antigo)",
+            "Testar que VAD continua funcionando corretamente apos migracao",
+            "Remover todo codigo de ScriptProcessor apos confirmar que AudioWorklet funciona"
+          ],
+          "contexto_tecnico": "useGeminiLive.ts linha ~200 usa createScriptProcessor(4096, 1, 1) com onaudioprocess. useOpenAIRealtime.ts faz similar. Ambos convertem Float32Array para Int16Array e depois para base64."
+        },
+        {
+          "id": "F1-T4",
+          "titulo": "Adicionar controle de velocidade de reproducao ao video player",
+          "prioridade": "MEDIA",
+          "descricao": "Permitir que o aluno ajuste a velocidade do video (0.75x, 1x, 1.25x, 1.5x, 2x). Alunos avancados podem acelerar, alunos com dificuldade podem desacelerar.",
+          "arquivos_afetados": [
+            "src/components/VideoPlayer.tsx (MODIFICAR)",
+            "src/components/DirectVideoPlayer.tsx (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Adicionar botao de velocidade na barra de controles do player",
+            "Opcoes: 0.75x, 1x, 1.25x, 1.5x, 2x",
+            "Para YouTube: usar player.setPlaybackRate(rate)",
+            "Para HTML5 video: usar videoElement.playbackRate = rate",
+            "Exibir velocidade atual no botao (ex: '1.5x')",
+            "Salvar preferencia no localStorage",
+            "Notificar a IA quando velocidade mudar (para ajustar timing de intervencoes)"
+          ]
+        },
+        {
+          "id": "F1-T5",
+          "titulo": "Adicionar monitoramento de erros com Sentry",
+          "prioridade": "ALTA",
+          "descricao": "Integrar Sentry para capturar erros em producao. Atualmente existem 337 console.log espalhados pelo codigo e nenhum monitoramento real.",
+          "arquivos_afetados": [
+            "package.json (MODIFICAR - adicionar @sentry/react)",
+            "src/main.tsx (MODIFICAR - inicializar Sentry)",
+            "src/components/ErrorBoundary.tsx (MODIFICAR - integrar com Sentry)",
+            "src/lib/logger.ts (CRIAR - logger centralizado)"
+          ],
+          "requisitos": [
+            "Instalar @sentry/react e @sentry/vite-plugin",
+            "Inicializar Sentry em main.tsx com DSN via env var VITE_SENTRY_DSN",
+            "Criar src/lib/logger.ts com metodos: info(), warn(), error(), debug()",
+            "O logger deve: em dev -> console.log, em prod -> Sentry.captureMessage/captureException",
+            "Integrar ErrorBoundary.tsx existente com Sentry.ErrorBoundary",
+            "Adicionar Sentry.setUser() quando aluno faz login",
+            "NAO substituir todos os 337 console.log agora - apenas criar a infraestrutura",
+            "Adicionar source maps upload no build via @sentry/vite-plugin"
+          ]
+        },
+        {
+          "id": "F1-T6",
+          "titulo": "Aumentar cobertura de testes para hooks criticos",
+          "prioridade": "ALTA",
+          "descricao": "Criar testes unitarios para os hooks mais criticos da aplicacao. Atualmente so existem 7 arquivos de teste (~5% cobertura).",
+          "arquivos_afetados": [
+            "src/hooks/useQuiz.test.ts (CRIAR)",
+            "src/hooks/useTimestampQuizzes.test.ts (CRIAR)",
+            "src/hooks/useStudentMemory.test.ts (CRIAR)",
+            "src/hooks/useMissions.test.ts (CRIAR)",
+            "src/hooks/useModuleProgress.test.ts (CRIAR)",
+            "src/components/MiniQuiz.test.tsx (CRIAR)",
+            "src/components/VideoPlayer.test.tsx (CRIAR)"
+          ],
+          "requisitos": [
+            "Usar vitest (ja configurado) + @testing-library/react (ja instalado)",
+            "Mockar supabase client para testes de hooks que usam banco",
+            "Testar useQuiz: carregamento, selecao de resposta, calculo de score, passing/failing",
+            "Testar useTimestampQuizzes: trigger no timestamp correto, tolerancia de 2s, nao re-trigger",
+            "Testar useStudentMemory: salvar/carregar perfil, registrar observacao, buildMemoryContext",
+            "Testar useMissions: carregar missoes, completar missao, progresso",
+            "Testar MiniQuiz: renderizacao, selecao de opcao, feedback correto/incorreto",
+            "Testar VideoPlayer: play/pause, seek, controles basicos",
+            "Meta: atingir pelo menos 40% de cobertura total",
+            "Rodar com: npm run test"
+          ]
+        }
+      ]
+    },
+    {
+      "fase": 2,
+      "nome": "Experiencia - Melhorar retencao do aluno",
+      "estimativa": "2-4 meses",
+      "tarefas": [
+        {
+          "id": "F2-T1",
+          "titulo": "Quiz adaptativo baseado no perfil do aluno",
+          "prioridade": "ALTA",
+          "descricao": "Modificar o sistema de quiz para ajustar a dificuldade com base no historico do aluno. Usar dados de student_profiles (strengths, areas_to_improve) e student_quiz_results para selecionar perguntas apropriadas.",
+          "arquivos_afetados": [
+            "supabase/functions/quiz-generator/index.ts (MODIFICAR)",
+            "src/hooks/useQuiz.ts (MODIFICAR)",
+            "src/hooks/useTimestampQuizzes.ts (MODIFICAR)",
+            "src/hooks/useStudentMemory.ts (MODIFICAR - expor metodo getStudentLevel)"
+          ],
+          "requisitos": [
+            "No quiz-generator, consultar student_profiles para obter areas fortes/fracas do aluno",
+            "Consultar student_quiz_results para ver historico de acertos",
+            "Se aluno acerta >80% consistentemente, aumentar dificuldade (perguntas mais complexas)",
+            "Se aluno acerta <50%, simplificar perguntas e focar nas areas fracas",
+            "Adicionar campo 'difficulty' (easy/medium/hard) na tabela video_quizzes",
+            "Criar migration SQL para o novo campo",
+            "Manter compatibilidade com quizzes existentes (default: medium)"
+          ]
+        },
+        {
+          "id": "F2-T2",
+          "titulo": "Feedback contextual e personalizado por opcao errada",
+          "prioridade": "ALTA",
+          "descricao": "Quando o aluno erra uma questao, em vez de mostrar uma explicacao generica, gerar feedback especifico para a opcao errada escolhida, explicando POR QUE aquela opcao esta incorreta.",
+          "arquivos_afetados": [
+            "src/components/LessonQuiz.tsx (MODIFICAR)",
+            "src/components/MiniQuiz.tsx (MODIFICAR)",
+            "supabase/functions/agent-feedback/index.ts (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Ao errar, chamar agent-feedback com: pergunta, opcao escolhida, opcao correta, contexto do video",
+            "Exibir feedback da IA em balao ao lado da opcao errada",
+            "Feedback deve ser curto (2-3 frases), em portugues, tom encorajador",
+            "Cachear feedback para mesma combinacao pergunta+opcao (evitar chamadas repetidas)",
+            "Mostrar loading spinner enquanto gera feedback",
+            "Fallback: se IA falhar, mostrar explanation padrao da questao"
+          ]
+        },
+        {
+          "id": "F2-T3",
+          "titulo": "PWA com Service Worker e cache offline",
+          "prioridade": "MEDIA",
+          "descricao": "Transformar a aplicacao em PWA para funcionar offline parcialmente. Em regioes com internet instavel (realidade de muitas escolas brasileiras), o aluno perde acesso total.",
+          "arquivos_afetados": [
+            "public/manifest.json (CRIAR)",
+            "public/sw.js (CRIAR - service worker)",
+            "src/main.tsx (MODIFICAR - registrar SW)",
+            "index.html (MODIFICAR - adicionar manifest link)",
+            "vite.config.ts (MODIFICAR - adicionar vite-plugin-pwa)"
+          ],
+          "requisitos": [
+            "Instalar vite-plugin-pwa",
+            "Criar manifest.json com icones, nome, cores, display standalone",
+            "Estrategia de cache: Network First para API calls, Cache First para assets estaticos",
+            "Cachear transcricoes e dados de quiz apos primeiro acesso",
+            "NAO cachear videos (muito grande) - apenas mostrar mensagem 'sem conexao' para video",
+            "Pagina offline basica mostrando conteudo cacheado disponivel",
+            "Adicionar botao 'Instalar App' no header quando disponivel (beforeinstallprompt)",
+            "Funcionar em Chrome, Edge e Safari (iOS 16.4+)"
+          ]
+        },
+        {
+          "id": "F2-T4",
+          "titulo": "Picture-in-Picture para video",
+          "prioridade": "MEDIA",
+          "descricao": "Permitir que o aluno coloque o video em modo Picture-in-Picture para continuar assistindo enquanto interage com o chat, quizzes ou missoes.",
+          "arquivos_afetados": [
+            "src/components/VideoPlayer.tsx (MODIFICAR)",
+            "src/components/DirectVideoPlayer.tsx (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Adicionar botao PiP na barra de controles do player",
+            "Para YouTube: extrair <video> do iframe nao e possivel - usar Document PiP API (Chrome 116+)",
+            "Para HTML5 video: usar videoElement.requestPictureInPicture()",
+            "Detectar suporte via document.pictureInPictureEnabled",
+            "Esconder botao se browser nao suporta",
+            "Ao entrar em PiP, manter controles de play/pause do professor IA funcionando"
+          ]
+        },
+        {
+          "id": "F2-T5",
+          "titulo": "Streaming adaptativo com HLS.js para videos diretos",
+          "prioridade": "MEDIA",
+          "descricao": "Implementar HLS.js para videos hospedados diretamente (nao YouTube) para que o video adapte a qualidade automaticamente conforme a velocidade da internet do aluno.",
+          "arquivos_afetados": [
+            "package.json (MODIFICAR - adicionar hls.js)",
+            "src/components/DirectVideoPlayer.tsx (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Instalar hls.js",
+            "Se URL do video termina em .m3u8, usar HLS.js para carregar",
+            "Se URL e .mp4 direto, manter comportamento atual (HTML5 nativo)",
+            "Fallback: se browser suporta HLS nativo (Safari), usar nativo",
+            "Exibir indicador de qualidade atual (auto/720p/480p/360p)",
+            "Permitir selecao manual de qualidade",
+            "Detectar buffering e exibir spinner"
+          ]
+        },
+        {
+          "id": "F2-T6",
+          "titulo": "OAuth com Google para login simplificado",
+          "prioridade": "MEDIA",
+          "descricao": "Adicionar login com Google via Supabase Auth. A maioria dos alunos brasileiros ja tem conta Google, reduzindo friccao de cadastro.",
+          "arquivos_afetados": [
+            "src/components/auth/LoginForm.tsx (MODIFICAR)",
+            "src/components/auth/SignupForm.tsx (MODIFICAR)",
+            "src/hooks/useAuth.ts (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Adicionar botao 'Entrar com Google' nas telas de login e cadastro",
+            "Usar supabase.auth.signInWithOAuth({ provider: 'google' })",
+            "Configurar redirect URL corretamente",
+            "Após login OAuth, criar/atualizar student_profile automaticamente",
+            "Preencher nome do perfil com nome do Google automaticamente",
+            "Manter opcao de login por email/senha existente",
+            "Estilizar botao Google conforme guidelines do Google (cores, icone)",
+            "NOTA: Configuracao no Supabase Dashboard (Google Client ID/Secret) e manual"
+          ]
+        }
+      ]
+    },
+    {
+      "fase": 3,
+      "nome": "Inteligencia - Diferenciacao competitiva",
+      "estimativa": "4-6 meses",
+      "tarefas": [
+        {
+          "id": "F3-T1",
+          "titulo": "RAG com pgvector para respostas baseadas na transcricao",
+          "prioridade": "ALTA",
+          "descricao": "Implementar Retrieval-Augmented Generation usando pgvector no Supabase. O professor virtual podera buscar trechos exatos da transcricao do video para responder perguntas do aluno com precisao, em vez de inventar respostas.",
+          "arquivos_afetados": [
+            "supabase/migrations/XXXXXX_add_pgvector.sql (CRIAR)",
+            "supabase/functions/embed-transcript/index.ts (CRIAR)",
+            "supabase/functions/search-transcript/index.ts (CRIAR)",
+            "src/hooks/useOpenAIRealtime.ts (MODIFICAR - adicionar tool search_transcript)",
+            "src/hooks/useGeminiLive.ts (MODIFICAR - adicionar tool search_transcript)"
+          ],
+          "requisitos": [
+            "Ativar extensao pgvector: CREATE EXTENSION IF NOT EXISTS vector",
+            "Criar tabela transcript_embeddings: id, video_id, chunk_text, chunk_index, embedding vector(1536), metadata jsonb",
+            "Edge function embed-transcript: recebe video_id, pega transcript, divide em chunks de ~500 tokens com overlap de 50, gera embeddings via OpenAI text-embedding-3-small, salva no banco",
+            "Edge function search-transcript: recebe query + video_id, gera embedding da query, busca top 5 chunks mais similares via cosine similarity",
+            "Adicionar tool 'search_transcript' nos hooks de IA (OpenAI e Gemini) com parametros: query (string), video_id (string)",
+            "Quando professor IA precisa responder pergunta sobre conteudo, usa search_transcript primeiro",
+            "Incluir chunks encontrados no prompt como contexto",
+            "Rodar embed-transcript automaticamente quando video e configurado (is_configured = true)"
+          ]
+        },
+        {
+          "id": "F3-T2",
+          "titulo": "Intervencao contextual do professor baseada no conteudo do video",
+          "prioridade": "ALTA",
+          "descricao": "Quando o sistema detecta desengajamento, em vez de enviar frases genericas, o professor deve reagir ao conteudo especifico que estava sendo ensinado naquele momento do video.",
+          "arquivos_afetados": [
+            "src/hooks/useOpenAIRealtime.ts (MODIFICAR)",
+            "src/hooks/useGeminiLive.ts (MODIFICAR)",
+            "src/hooks/useEngagementDetection/index.ts (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Quando engajamento cai abaixo de 0.3, coletar: timestamp atual do video, trecho da transcricao ao redor desse timestamp (+-30s), ultimo topico discutido",
+            "Enviar esse contexto para a IA junto com o sinal de desengajamento",
+            "Prompt: 'O aluno parece desengajado. Ele estava assistindo sobre [TOPICO] no minuto [XX:XX]. Faca uma intervencao relacionada ao conteudo para re-engajar.'",
+            "Variar tipo de intervencao: pergunta sobre o conteudo, analogia, curiosidade, desafio rapido",
+            "Nao repetir o mesmo tipo de intervencao consecutivamente",
+            "Registrar intervencao em student_observations para aprendizado futuro"
+          ]
+        },
+        {
+          "id": "F3-T3",
+          "titulo": "Unificar audio pipeline de OpenAI e Gemini",
+          "prioridade": "MEDIA",
+          "descricao": "Criar camada de abstracao unificada para o pipeline de audio. Atualmente, useGeminiLive.ts e useOpenAIRealtime.ts tem ~1.700 linhas combinadas com muito codigo duplicado de captura, processamento e reproducao de audio.",
+          "arquivos_afetados": [
+            "src/hooks/useAudioPipeline.ts (CRIAR)",
+            "src/hooks/useAudioPlayback.ts (CRIAR)",
+            "src/hooks/useGeminiLive.ts (REFATORAR)",
+            "src/hooks/useOpenAIRealtime.ts (REFATORAR)"
+          ],
+          "requisitos": [
+            "Criar useAudioPipeline: captura de mic, filtros (high-pass, low-pass, compressor), VAD, conversao PCM, encoding base64",
+            "Criar useAudioPlayback: decodificacao base64, queue de playback, controle de volume",
+            "Interface generica: onAudioChunk(base64), playAudio(base64), startCapture(), stopCapture()",
+            "Configuracao por provider: sampleRate (16kHz Gemini, 24kHz OpenAI), encoding format",
+            "Gemini e OpenAI devem usar esses hooks em vez de implementar audio do zero",
+            "Manter mesma qualidade de audio apos refatoracao",
+            "Reduzir codigo total em pelo menos 40%"
+          ]
+        },
+        {
+          "id": "F3-T4",
+          "titulo": "Fallback automatico entre OpenAI e Gemini",
+          "prioridade": "MEDIA",
+          "descricao": "Quando um provider de IA falha ou esta fora do ar, fazer fallback automatico para o outro sem que o aluno perceba interrupcao.",
+          "arquivos_afetados": [
+            "src/hooks/useVoiceProvider.ts (CRIAR)",
+            "src/components/VoiceChat.tsx (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Criar useVoiceProvider que gerencia qual provider esta ativo",
+            "Se WebSocket do provider atual falhar 3 vezes consecutivas, trocar para o outro",
+            "Ao trocar, transferir: contexto da conversa, student memory, video state",
+            "Indicar ao aluno (toast sutil): 'Conexao restaurada com professor alternativo'",
+            "Health check periodico (ping/pong a cada 30s)",
+            "Preferencia de provider configuravel pelo admin",
+            "Log de fallbacks para analytics"
+          ]
+        },
+        {
+          "id": "F3-T5",
+          "titulo": "Dashboard analitico para o professor/admin",
+          "prioridade": "MEDIA",
+          "descricao": "Criar dashboard com insights sobre o desempenho dos alunos, taxa de conclusao, pontos de dificuldade, e engajamento por video.",
+          "arquivos_afetados": [
+            "src/pages/Analytics.tsx (CRIAR)",
+            "src/components/analytics/EngagementChart.tsx (CRIAR)",
+            "src/components/analytics/QuizPerformance.tsx (CRIAR)",
+            "src/components/analytics/StudentProgress.tsx (CRIAR)",
+            "src/components/analytics/DifficultyHeatmap.tsx (CRIAR)"
+          ],
+          "requisitos": [
+            "Pagina acessivel apenas para role=admin",
+            "Graficos com recharts (ja instalado): engajamento medio por video, taxa de conclusao por modulo",
+            "Tabela de alunos com: nome, tempo total, ultimo acesso, media de quizzes",
+            "Heatmap de timestamps onde mais alunos desengajam (identifica conteudo problematico)",
+            "Distribuicao de notas nos quizzes por questao",
+            "Filtros por periodo (7d, 30d, 90d) e por modulo",
+            "Export para CSV",
+            "Dados vem de: student_quiz_results, student_lesson_progress, student_observations"
+          ]
+        }
+      ]
+    },
+    {
+      "fase": 4,
+      "nome": "Escala - Crescimento e expansao",
+      "estimativa": "6-12 meses",
+      "tarefas": [
+        {
+          "id": "F4-T1",
+          "titulo": "Internacionalizacao (i18n) com react-intl",
+          "prioridade": "MEDIA",
+          "descricao": "Preparar a aplicacao para multi-idioma. Atualmente todos os textos estao hardcoded em PT-BR.",
+          "arquivos_afetados": [
+            "package.json (MODIFICAR - adicionar react-intl)",
+            "src/i18n/ (CRIAR diretorio com arquivos de traducao)",
+            "src/i18n/pt-BR.json (CRIAR)",
+            "src/i18n/en-US.json (CRIAR)",
+            "src/i18n/es-ES.json (CRIAR)",
+            "src/main.tsx (MODIFICAR - IntlProvider)",
+            "TODOS os componentes com texto hardcoded (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Instalar react-intl (formatjs)",
+            "Extrair todas as strings de UI para arquivos JSON de traducao",
+            "Criar traducoes para: PT-BR (completo), EN-US (completo), ES-ES (parcial)",
+            "Seletor de idioma no header/settings",
+            "Salvar preferencia de idioma no localStorage e no perfil do aluno",
+            "Formatar datas, numeros e moedas conforme locale",
+            "Professor IA deve falar no idioma selecionado (alterar system prompt)"
+          ]
+        },
+        {
+          "id": "F4-T2",
+          "titulo": "Sistema de gamificacao completo (XP, streaks, leaderboard)",
+          "prioridade": "MEDIA",
+          "descricao": "Expandir o sistema de missoes atual para incluir XP, streaks de estudo e leaderboard entre alunos.",
+          "arquivos_afetados": [
+            "supabase/migrations/XXXXXX_gamification.sql (CRIAR)",
+            "src/hooks/useGamification.ts (CRIAR)",
+            "src/components/XPBar.tsx (CRIAR)",
+            "src/components/StreakCounter.tsx (CRIAR)",
+            "src/components/Leaderboard.tsx (CRIAR)",
+            "src/components/AchievementsPanel.tsx (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Tabela student_xp: student_id, total_xp, level, current_streak_days, longest_streak_days, last_study_date",
+            "XP por acao: assistir video completo (50xp), acertar quiz (20xp), completar missao (30xp), streak bonus (+10% por dia)",
+            "Niveis: 0-100 Iniciante, 101-500 Estudante, 501-1500 Dedicado, 1501-5000 Expert, 5000+ Mestre",
+            "Streak: incrementa se aluno estuda pelo menos 10 minutos no dia",
+            "Leaderboard: top 20 alunos por XP (anonimizado se aluno preferir)",
+            "Badges: 7 dias seguidos, primeiro quiz 100%, todas missoes de um modulo, etc",
+            "Animacao de level up com confetti (framer-motion)"
+          ]
+        },
+        {
+          "id": "F4-T3",
+          "titulo": "Perguntas abertas avaliadas pela IA",
+          "prioridade": "MEDIA",
+          "descricao": "Adicionar questoes dissertativas nos quizzes, avaliadas automaticamente pela IA usando o agent-evaluator que ja existe.",
+          "arquivos_afetados": [
+            "supabase/migrations/XXXXXX_open_questions.sql (CRIAR)",
+            "supabase/functions/agent-evaluator/index.ts (MODIFICAR)",
+            "src/components/LessonQuiz.tsx (MODIFICAR)",
+            "src/components/OpenQuestionInput.tsx (CRIAR)",
+            "src/hooks/useQuiz.ts (MODIFICAR)"
+          ],
+          "requisitos": [
+            "Novo tipo de questao: 'open' (alem de 'multiple_choice')",
+            "Campo textarea para aluno digitar resposta (min 20 chars, max 500 chars)",
+            "agent-evaluator recebe: pergunta, resposta esperada (rubrica), resposta do aluno, contexto do video",
+            "Retorna: nota (0-10), feedback textual, pontos fortes da resposta, pontos a melhorar",
+            "Exibir rubrica de avaliacao ao aluno apos submissao",
+            "Permitir que aluno reescreva 1 vez apos feedback",
+            "Salvar ambas tentativas no banco para analytics"
+          ]
+        },
+        {
+          "id": "F4-T4",
+          "titulo": "Migrar para Next.js com SSR hibrido",
+          "prioridade": "BAIXA",
+          "descricao": "Migrar de Vite SPA para Next.js 15 com Turbopack para obter SSR nas paginas publicas (catalogo de cursos, landing page) e manter CSR no dashboard autenticado.",
+          "arquivos_afetados": [
+            "REESTRUTURACAO COMPLETA do projeto",
+            "next.config.ts (CRIAR)",
+            "app/ (CRIAR - App Router)",
+            "app/page.tsx (landing page SSG)",
+            "app/cursos/page.tsx (catalogo SSG)",
+            "app/aluno/ (dashboard CSR)",
+            "app/admin/ (dashboard CSR)"
+          ],
+          "requisitos": [
+            "ATENCAO: Esta e a tarefa mais complexa. Fazer em branch separada.",
+            "Instalar next@15, remover vite e react-router-dom",
+            "Converter rotas de react-router para App Router (file-based routing)",
+            "Paginas publicas (/, /cursos, /sobre): SSG com revalidate a cada 1 hora",
+            "Dashboard (/aluno/*): 'use client' com Suspense boundaries",
+            "Admin (/admin/*): 'use client'",
+            "Manter TODAS as funcionalidades existentes",
+            "Migrar de Vite env vars (VITE_*) para Next.js env vars (NEXT_PUBLIC_*)",
+            "Configurar Supabase SSR client para server components",
+            "Meta tags / Open Graph para compartilhamento de aulas",
+            "Testar tudo extensivamente antes de merge"
+          ]
+        }
+      ]
+    }
+  ],
+  "notas_importantes": [
+    "Sempre rode 'npm run test' apos cada alteracao para garantir que nada quebrou",
+    "Faca commit apos cada tarefa concluida com mensagem descritiva",
+    "Se uma tarefa depende de configuracao externa (ex: Sentry DSN, Google OAuth), crie o codigo mas use env vars - a configuracao sera feita manualmente depois",
+    "Priorize as tarefas marcadas como CRITICA > ALTA > MEDIA > BAIXA",
+    "A tarefa F4-T4 (Next.js) deve ser feita em branch separada por ser de alto risco",
+    "Mantenha compatibilidade com o TypeScript existente (strict: false por enquanto)",
+    "Use os componentes shadcn/ui ja existentes - nao instale bibliotecas de UI adicionais",
+    "Todos os textos de UI devem ser em portugues brasileiro"
+  ]
+}
