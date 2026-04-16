@@ -1,4 +1,4 @@
-project_id = "atkektzlfijvoyuexqes"
+project_id = "emeeklwuvemhqiglsect"
 
 [functions.gemini-token]
 verify_jwt = true
@@ -28,6 +28,9 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.quiz-generator]
+verify_jwt = true
+
+[functions.school-factory]
 verify_jwt = true
 
 [functions.export-sql]

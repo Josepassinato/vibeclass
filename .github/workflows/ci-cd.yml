@@ -1,0 +1,108 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run tests
+        run: npx vitest run
+
+      - name: Run school-factory integration flow (when secrets are configured)
+        if: secrets.SUPABASE_URL != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.SCHOOL_FACTORY_ADMIN_PASSWORD != ''
+        env:
+          SCHOOL_FACTORY_E2E_ENABLED: "true"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCHOOL_FACTORY_ADMIN_PASSWORD: ${{ secrets.SCHOOL_FACTORY_ADMIN_PASSWORD }}
+        run: npx vitest run src/integration/schoolFactoryFlow.test.ts
+
+      - name: Build
+        run: npm run build
+
+  deploy-production:
+    needs: quality
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.SUPABASE_ACCESS_TOKEN != '' && secrets.SUPABASE_PROJECT_REF != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+
+      - name: Link project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+
+      - name: Sync critical function secrets
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SCHOOL_FACTORY_ADMIN_PASSWORD: ${{ secrets.SCHOOL_FACTORY_ADMIN_PASSWORD }}
+          DOMAIN_DATA_BACKEND: ${{ secrets.DOMAIN_DATA_BACKEND }}
+          MONGO_DATA_API_BASE_URL: ${{ secrets.MONGO_DATA_API_BASE_URL }}
+          MONGO_DATA_API_KEY: ${{ secrets.MONGO_DATA_API_KEY }}
+          MONGO_DATA_SOURCE: ${{ secrets.MONGO_DATA_SOURCE }}
+          MONGO_DATA_DATABASE: ${{ secrets.MONGO_DATA_DATABASE }}
+          MONGO_PROJECTS_COLLECTION: ${{ secrets.MONGO_PROJECTS_COLLECTION }}
+          MONGO_TASKS_COLLECTION: ${{ secrets.MONGO_TASKS_COLLECTION }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${SCHOOL_FACTORY_ADMIN_PASSWORD:-}" ]; then
+            args+=("ADMIN_PASSWORD=${SCHOOL_FACTORY_ADMIN_PASSWORD}")
+          fi
+          if [ -n "${DOMAIN_DATA_BACKEND:-}" ]; then
+            args+=("DOMAIN_DATA_BACKEND=${DOMAIN_DATA_BACKEND}")
+          fi
+          if [ -n "${MONGO_DATA_API_BASE_URL:-}" ]; then
+            args+=("MONGO_DATA_API_BASE_URL=${MONGO_DATA_API_BASE_URL}")
+          fi
+          if [ -n "${MONGO_DATA_API_KEY:-}" ]; then
+            args+=("MONGO_DATA_API_KEY=${MONGO_DATA_API_KEY}")
+          fi
+          if [ -n "${MONGO_DATA_SOURCE:-}" ]; then
+            args+=("MONGO_DATA_SOURCE=${MONGO_DATA_SOURCE}")
+          fi
+          if [ -n "${MONGO_DATA_DATABASE:-}" ]; then
+            args+=("MONGO_DATA_DATABASE=${MONGO_DATA_DATABASE}")
+          fi
+          if [ -n "${MONGO_PROJECTS_COLLECTION:-}" ]; then
+            args+=("MONGO_PROJECTS_COLLECTION=${MONGO_PROJECTS_COLLECTION}")
+          fi
+          if [ -n "${MONGO_TASKS_COLLECTION:-}" ]; then
+            args+=("MONGO_TASKS_COLLECTION=${MONGO_TASKS_COLLECTION}")
+          fi
+          if [ "${#args[@]}" -gt 0 ]; then
+            supabase secrets set "${args[@]}"
+          fi
+
+      - name: Push database migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase db push --yes
+
+      - name: Deploy critical edge functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy school-factory
+          supabase functions deploy admin-videos

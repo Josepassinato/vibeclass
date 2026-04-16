@@ -1,0 +1,36 @@
+name: School Factory Runner
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run-factory-cron:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: secrets.SUPABASE_PROJECT_REF != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.SCHOOL_FACTORY_ADMIN_PASSWORD != ''
+    concurrency:
+      group: school-factory-runner
+      cancel-in-progress: false
+    steps:
+      - name: Trigger school-factory run_cron
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FACTORY_PASSWORD: ${{ secrets.SCHOOL_FACTORY_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          URL="https://${PROJECT_REF}.functions.supabase.co/school-factory"
+          PAYLOAD=$(printf '{"action":"run_cron","password":"%s","max_tasks":8}' "$FACTORY_PASSWORD")
+          RESPONSE=$(curl --fail --silent --show-error \
+            -X POST "$URL" \
+            -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          echo "$RESPONSE" | jq .
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null; then
+            echo "Runner retornou erro"
+            exit 1
+          fi

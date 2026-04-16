@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit, ArrowLeft, Video, Lock, Eye, EyeOff, FileText, Users, Clock, BookOpen, CheckCircle, Settings, Play, Pause, Target, Lightbulb, Loader2, Sparkles, HelpCircle, GripVertical, ArrowUp, ArrowDown, Unlock, ListOrdered, FolderOpen, Library, Download } from 'lucide-react';
+import { Plus, Trash2, Edit, ArrowLeft, Video, Lock, Eye, EyeOff, FileText, Users, Clock, BookOpen, CheckCircle, Settings, Play, Pause, Target, Lightbulb, Loader2, Sparkles, HelpCircle, GripVertical, ArrowUp, ArrowDown, Unlock, ListOrdered, FolderOpen, Library, Download, Bot } from 'lucide-react';
 import { ExportDataButton } from '@/components/ExportDataButton';
 import { ExportTranscriptsPdf } from '@/components/ExportTranscriptsPdf';
 import { QuizEditor } from '@/components/QuizEditor';
@@ -20,6 +20,7 @@ import { MissionsAdmin } from '@/components/MissionsAdmin';
 import { ModulesAdmin } from '@/components/ModulesAdmin';
 import { NarrativeLibrary } from '@/components/NarrativeLibrary';
 import { WhiteLabelSettings } from '@/components/WhiteLabelSettings';
+import { SchoolFactoryPanel } from '@/components/SchoolFactoryPanel';
 import { Switch } from '@/components/ui/switch';
 import { useBranding } from '@/branding';
 
@@ -49,7 +50,7 @@ interface VideoLesson {
 }
 
 export default function Admin() {
-  type AdminSection = 'lessons' | 'missions' | 'modules' | 'library' | 'branding';
+  type AdminSection = 'lessons' | 'missions' | 'modules' | 'library' | 'branding' | 'factory';
   const navigate = useNavigate();
   const { isWhiteLabelProduct } = useBranding();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -473,6 +474,8 @@ export default function Admin() {
                   ? 'Gerenciar missões'
                   : adminSection === 'modules'
                   ? 'Gerenciar módulos'
+                  : adminSection === 'factory'
+                  ? 'Operação autônoma da escola'
                   : adminSection === 'library'
                   ? 'Biblioteca pedagógica'
                   : isWhiteLabelProduct
@@ -549,6 +552,15 @@ export default function Admin() {
               </Button>
             )}
             <Button
+              variant={adminSection === 'factory' ? 'default' : 'ghost'}
+              size="sm"
+              className="rounded-none rounded-t-lg mt-1"
+              onClick={() => setAdminSection('factory')}
+            >
+              <Bot className="h-4 w-4 mr-2" />
+              Fábrica IA
+            </Button>
+            <Button
               variant={adminSection === 'library' ? 'default' : 'ghost'}
               size="sm"
               className="rounded-none rounded-t-lg mt-1"
@@ -567,6 +579,8 @@ export default function Admin() {
           <MissionsAdmin />
         ) : adminSection === 'modules' ? (
           <ModulesAdmin password={password} />
+        ) : adminSection === 'factory' ? (
+          <SchoolFactoryPanel password={password} />
         ) : adminSection === 'branding' && isWhiteLabelProduct ? (
           <WhiteLabelSettings />
         ) : adminSection === 'library' ? (
