@@ -81,6 +81,13 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SCHOOL_FACTORY_ADMIN_PASSWORD: ${{ secrets.SCHOOL_FACTORY_ADMIN_PASSWORD }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY }}
+          HEYGEN_AVATAR_ID: ${{ secrets.HEYGEN_AVATAR_ID }}
+          HEYGEN_VOICE_ID: ${{ secrets.HEYGEN_VOICE_ID }}
+          TAVUS_API_KEY: ${{ secrets.TAVUS_API_KEY }}
+          TAVUS_REPLICA_ID: ${{ secrets.TAVUS_REPLICA_ID }}
+          TAVUS_BASE_URL: ${{ secrets.TAVUS_BASE_URL }}
           DOMAIN_DATA_BACKEND: ${{ secrets.DOMAIN_DATA_BACKEND }}
           MONGO_DATA_API_BASE_URL: ${{ secrets.MONGO_DATA_API_BASE_URL }}
           MONGO_DATA_API_KEY: ${{ secrets.MONGO_DATA_API_KEY }}
@@ -93,6 +100,27 @@ jobs:
           args=()
           if [ -n "${SCHOOL_FACTORY_ADMIN_PASSWORD:-}" ]; then
             args+=("ADMIN_PASSWORD=${SCHOOL_FACTORY_ADMIN_PASSWORD}")
+          fi
+          if [ -n "${XAI_API_KEY:-}" ]; then
+            args+=("XAI_API_KEY=${XAI_API_KEY}")
+          fi
+          if [ -n "${HEYGEN_API_KEY:-}" ]; then
+            args+=("HEYGEN_API_KEY=${HEYGEN_API_KEY}")
+          fi
+          if [ -n "${HEYGEN_AVATAR_ID:-}" ]; then
+            args+=("HEYGEN_AVATAR_ID=${HEYGEN_AVATAR_ID}")
+          fi
+          if [ -n "${HEYGEN_VOICE_ID:-}" ]; then
+            args+=("HEYGEN_VOICE_ID=${HEYGEN_VOICE_ID}")
+          fi
+          if [ -n "${TAVUS_API_KEY:-}" ]; then
+            args+=("TAVUS_API_KEY=${TAVUS_API_KEY}")
+          fi
+          if [ -n "${TAVUS_REPLICA_ID:-}" ]; then
+            args+=("TAVUS_REPLICA_ID=${TAVUS_REPLICA_ID}")
+          fi
+          if [ -n "${TAVUS_BASE_URL:-}" ]; then
+            args+=("TAVUS_BASE_URL=${TAVUS_BASE_URL}")
           fi
           if [ -n "${DOMAIN_DATA_BACKEND:-}" ]; then
             args+=("DOMAIN_DATA_BACKEND=${DOMAIN_DATA_BACKEND}")
