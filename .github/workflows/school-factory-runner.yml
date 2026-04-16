@@ -9,12 +9,27 @@ jobs:
   run-factory-cron:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: secrets.SUPABASE_PROJECT_REF != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.SCHOOL_FACTORY_ADMIN_PASSWORD != ''
     concurrency:
       group: school-factory-runner
       cancel-in-progress: false
     steps:
+      - name: Validate required secrets
+        id: preflight
+        env:
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FACTORY_PASSWORD: ${{ secrets.SCHOOL_FACTORY_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PROJECT_REF:-}" ] || [ -z "${SERVICE_ROLE_KEY:-}" ] || [ -z "${FACTORY_PASSWORD:-}" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Required secrets missing, skipping runner execution."
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Trigger school-factory run_cron
+        if: steps.preflight.outputs.enabled == 'true'
         env:
           PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
