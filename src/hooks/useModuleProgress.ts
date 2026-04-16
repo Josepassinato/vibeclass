@@ -64,7 +64,7 @@ export function useModuleProgress(studentId: string): UseModuleProgressReturn {
         supabase.from('student_mission_submissions')
           .select('mission_id, status, missions!inner(video_id)')
           .eq('student_id', studentId)
-          .eq('status', 'completed')
+          .in('status', ['approved', 'completed'])
       ]);
 
       if (modulesRes.error) throw modulesRes.error;

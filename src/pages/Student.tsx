@@ -571,7 +571,7 @@ const Student = () => {
 
               {/* Chat com conteúdo (RAG) */}
               <AnimatePresence>
-                {mobileTab === 'chat' && (
+                {mobileTab === 'chat' && currentLesson && (
                   <motion.div
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: 'auto', opacity: 1 }}
@@ -580,6 +580,7 @@ const Student = () => {
                   >
                     <div className="p-4 max-w-3xl mx-auto h-[60vh]">
                       <TranscriptChat
+                        videoId={currentLesson.id}
                         videoTitles={Object.fromEntries(savedVideos.map(v => [v.id, v.title]))}
                         onNavigateToMoment={(videoId) => {
                           const video = savedVideos.find(v => v.id === videoId);

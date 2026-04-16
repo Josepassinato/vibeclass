@@ -18,6 +18,7 @@ describeIfEnabled('School Factory Integration Flow', () => {
     });
 
     const projectName = `E2E Factory ${Date.now()}`;
+    const orgSlug = `e2e-${Date.now()}`;
 
     const { data: createData, error: createError } = await supabase.functions.invoke('school-factory', {
       body: {
@@ -25,6 +26,9 @@ describeIfEnabled('School Factory Integration Flow', () => {
         password: adminPassword,
         project: {
           name: projectName,
+          organization_name: `Org ${projectName}`,
+          organization_slug: orgSlug,
+          plan_code: 'starter',
           mode: 'create_zero',
           niche: 'teste integração',
           target_audience: 'time QA',
@@ -45,6 +49,8 @@ describeIfEnabled('School Factory Integration Flow', () => {
 
     expect(createError).toBeNull();
     expect(createData?.project?.id).toBeTruthy();
+    expect(createData?.organization?.id).toBeTruthy();
+    expect(createData?.subscription?.plan_code).toBeTruthy();
     const projectId = createData.project.id as string;
 
     const { data: planData, error: planError } = await supabase.functions.invoke('school-factory', {
@@ -80,5 +86,17 @@ describeIfEnabled('School Factory Integration Flow', () => {
     expect(runError).toBeNull();
     expect(runData?.task).toBeTruthy();
     expect(['completed', 'blocked', 'failed', 'running']).toContain(runData.task.status);
+
+    const { data: statusData, error: statusError } = await supabase.functions.invoke('school-factory', {
+      body: {
+        action: 'project_status',
+        password: adminPassword,
+        project_id: projectId,
+      },
+    });
+
+    expect(statusError).toBeNull();
+    expect(statusData?.saas?.organization?.id).toBeTruthy();
+    expect(statusData?.saas?.plan?.plan_code).toBeTruthy();
   }, 180_000);
 });

@@ -10,7 +10,8 @@ serve(async (req) => {
   if (corsResp) return corsResp;
 
   try {
-    const { action, password, video } = await req.json();
+    const payload = await req.json();
+    const { action, password, video, videos } = payload;
 
     // Verify admin password
     if (password !== ADMIN_PASSWORD) {
@@ -39,14 +40,31 @@ serve(async (req) => {
       }
 
       case "add": {
-        if (!video?.youtube_id || !video?.title) {
-          throw new Error("youtube_id e title são obrigatórios");
+        if (!video?.title) {
+          throw new Error("title é obrigatório");
+        }
+
+        const videoType = video.video_type || "youtube";
+        if (!["youtube", "direct", "external"].includes(videoType)) {
+          throw new Error("video_type inválido");
+        }
+        const youtubeId = video.youtube_id || null;
+        const videoUrl = video.video_url || null;
+
+        if (videoType === "youtube" && !youtubeId) {
+          throw new Error("youtube_id é obrigatório para vídeos do YouTube");
+        }
+
+        if ((videoType === "direct" || videoType === "external") && !videoUrl) {
+          throw new Error("video_url é obrigatório para vídeos diretos ou externos");
         }
 
         const { data, error } = await supabase
           .from("videos")
           .insert({
-            youtube_id: video.youtube_id,
+            youtube_id: youtubeId,
+            video_url: videoUrl,
+            video_type: videoType,
             title: video.title,
             transcript: video.transcript || null,
             analysis: video.analysis || null,
@@ -55,7 +73,11 @@ serve(async (req) => {
             lesson_order: video.lesson_order || 1,
             teaching_moments: video.teaching_moments || [],
             is_configured: video.is_configured || false,
-            thumbnail_url: video.thumbnail_url || `https://img.youtube.com/vi/${video.youtube_id}/hqdefault.jpg`,
+            thumbnail_url:
+              video.thumbnail_url ||
+              (videoType === "youtube" && youtubeId
+                ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+                : null),
           })
           .select()
           .single();
@@ -72,6 +94,10 @@ serve(async (req) => {
           throw new Error("id é obrigatório para atualização");
         }
 
+        if (video.video_type !== undefined && !["youtube", "direct", "external"].includes(video.video_type)) {
+          throw new Error("video_type inválido");
+        }
+
         // Build update object with only provided fields
         const updateData: Record<string, unknown> = {};
         if (video.title !== undefined) updateData.title = video.title;
@@ -85,6 +111,9 @@ serve(async (req) => {
         if (video.is_configured !== undefined) updateData.is_configured = video.is_configured;
         if (video.is_released !== undefined) updateData.is_released = video.is_released;
         if (video.teacher_intro !== undefined) updateData.teacher_intro = video.teacher_intro;
+        if (video.youtube_id !== undefined) updateData.youtube_id = video.youtube_id;
+        if (video.video_url !== undefined) updateData.video_url = video.video_url;
+        if (video.video_type !== undefined) updateData.video_type = video.video_type;
 
         const { data, error } = await supabase
           .from("videos")
@@ -102,7 +131,6 @@ serve(async (req) => {
 
       case "reorder": {
         // Receive an array of { id, lesson_order } and update all
-        const { videos } = await req.json().catch(() => ({ videos: video }));
         const videosToUpdate = videos || video;
         
         if (!Array.isArray(videosToUpdate)) {

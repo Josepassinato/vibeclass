@@ -61,6 +61,39 @@ Observações:
 - `ADMIN_PASSWORD` não tem mais fallback (`admin123`). Sem esse secret, a função retorna erro `503`.
 - Se o Mongo não estiver configurado, o sistema continua funcional em Supabase e sinaliza `mongo_configured: false`.
 
+### SaaS multi-tenant (organizações, plano, uso e billing)
+
+A função `school-factory` agora suporta:
+
+- provisionamento automático de organização (`provision_organization`)
+- criação de projeto já vinculada a tenant (`create_project` com `organization_*`)
+- memberships com papéis (`upsert_membership`)
+- atualização de assinatura/plano (`update_subscription`)
+- status completo de tenant/plano/uso (`project_status` e `organization_status`)
+
+Migração nova:
+
+```sh
+supabase db push
+```
+
+Tabelas criadas:
+
+- `saas_organizations`
+- `saas_memberships`
+- `saas_plan_limits`
+- `saas_subscriptions`
+- `saas_usage_monthly`
+
+Limites de plano aplicados automaticamente:
+
+- criação de projetos por mês
+- tarefas por mês
+- vídeos por mês
+- gasto SaaS mensal (USD)
+
+Quando um limite é atingido, o pipeline bloqueia a execução com motivo explícito no status.
+
 ### CI/CD e Runner Automático
 
 Para ativar deploy e runner no GitHub Actions, configure os secrets do repositório:
@@ -83,6 +116,18 @@ MONGO_DATA_SOURCE=...
 MONGO_DATA_DATABASE=...
 MONGO_PROJECTS_COLLECTION=school_factory_projects
 MONGO_TASKS_COLLECTION=school_factory_tasks
+```
+
+Secrets recomendados para pipeline de vídeo em produção:
+
+```
+XAI_API_KEY=<xai-api-key>
+HEYGEN_API_KEY=<heygen-api-key>
+HEYGEN_AVATAR_ID=<heygen-avatar-id>
+HEYGEN_VOICE_ID=<heygen-voice-id>
+TAVUS_API_KEY=<tavus-api-key>
+TAVUS_REPLICA_ID=<tavus-replica-id>
+TAVUS_BASE_URL=https://tavusapi.com/v2
 ```
 
 ## Build

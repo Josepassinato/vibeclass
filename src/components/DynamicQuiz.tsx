@@ -31,12 +31,18 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   easy: 'bg-green-500/20 text-green-400 border-green-500/30',
   medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
   hard: 'bg-red-500/20 text-red-400 border-red-500/30',
+  básico: 'bg-green-500/20 text-green-400 border-green-500/30',
+  intermediário: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  avançado: 'bg-red-500/20 text-red-400 border-red-500/30',
 };
 
 const DIFFICULTY_LABELS: Record<string, string> = {
   easy: 'Facil',
   medium: 'Medio',
   hard: 'Dificil',
+  básico: 'Basico',
+  intermediário: 'Intermediario',
+  avançado: 'Avancado',
 };
 
 const XP_PER_CORRECT = 20;
@@ -68,16 +74,22 @@ export function DynamicQuiz({ videoId, videoTitle, transcript }: DynamicQuizProp
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke('quiz-generator', {
-        body: { transcript, title: videoTitle, num_questions: 5 },
+        body: { transcript, title: videoTitle, numberOfQuestions: 5 },
       });
 
       if (fnError) throw fnError;
 
-      if (!data?.questions?.length) {
+      const generatedQuestions = Array.isArray(data?.quizzes)
+        ? data.quizzes
+        : Array.isArray(data?.questions)
+          ? data.questions
+          : [];
+
+      if (!generatedQuestions.length) {
         throw new Error('Nenhuma pergunta gerada');
       }
 
-      setQuestions(data.questions);
+      setQuestions(generatedQuestions);
       setState('playing');
     } catch (err: any) {
       setError(err.message || 'Erro ao gerar quiz');

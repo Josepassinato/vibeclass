@@ -51,7 +51,7 @@ export function useCertificateGeneration() {
         .from('student_mission_submissions')
         .select('mission_id, missions!inner(video_id)')
         .eq('student_id', studentId)
-        .eq('status', 'completed');
+        .in('status', ['approved', 'completed']);
 
       if (missionError) {
         logger.error('[CertGen] Error checking missions:', missionError);

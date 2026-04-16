@@ -18,6 +18,13 @@ interface FactoryProjectSummary {
   id: string;
   name: string;
   status: string;
+  organization_id?: string | null;
+  organization?: {
+    id: string;
+    name: string;
+    slug: string;
+    status: string;
+  } | null;
   initial_capital: number | null;
   budget_limit_usd: number | null;
   budget_spent_usd: number | null;
@@ -97,6 +104,46 @@ interface StatusPayload {
     hard_stop: boolean;
   };
   tutor_pack_versions: TutorPackVersion[];
+  saas?: {
+    organization: {
+      id: string;
+      name: string;
+      slug: string;
+      status: string;
+    };
+    subscription: {
+      id: string;
+      plan_code: string;
+      status: string;
+      provider: string;
+      trial_ends_at: string | null;
+      current_period_end: string | null;
+    };
+    plan: {
+      plan_code: string;
+      plan_name: string;
+      max_projects: number;
+      max_members: number;
+      max_videos_per_month: number;
+      max_tasks_per_month: number;
+      monthly_spend_limit_usd: number;
+      supports_white_label: boolean;
+    };
+    usage: {
+      reference_month: string;
+      projects_created: number;
+      tasks_executed: number;
+      videos_generated: number;
+      spend_usd: number;
+      members_added: number;
+    };
+    limits: {
+      remaining_projects: number;
+      remaining_tasks: number;
+      remaining_videos: number;
+      remaining_spend_usd: number;
+    };
+  } | null;
 }
 
 interface PdfJsTextItem {
@@ -148,6 +195,10 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
   const [mode, setMode] = useState<ProjectMode>('create_zero');
   const [schoolName, setSchoolName] = useState('');
   const [niche, setNiche] = useState('');
+  const [organizationName, setOrganizationName] = useState('');
+  const [organizationSlug, setOrganizationSlug] = useState('');
+  const [ownerUserId, setOwnerUserId] = useState('');
+  const [planCode, setPlanCode] = useState('starter');
   const [targetAudience, setTargetAudience] = useState('');
   const [initialCapital, setInitialCapital] = useState('');
   const [budgetLimit, setBudgetLimit] = useState('300');
@@ -161,6 +212,8 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
   const [objective, setObjective] = useState('');
   const [documentText, setDocumentText] = useState('');
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
+  const [subscriptionPlan, setSubscriptionPlan] = useState('growth');
+  const [subscriptionStatus, setSubscriptionStatus] = useState('active');
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) || statusData?.project || null,
@@ -259,6 +312,10 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
         action: 'create_project',
         project: {
           name: schoolName.trim(),
+          organization_name: organizationName.trim() || schoolName.trim(),
+          organization_slug: organizationSlug.trim() || null,
+          owner_user_id: ownerUserId.trim() || null,
+          plan_code: planCode.trim() || 'starter',
           mode,
           niche: niche.trim() || null,
           target_audience: targetAudience.trim() || null,
@@ -398,6 +455,33 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
     }
   };
 
+  const updateSubscription = async () => {
+    const organizationId = statusData?.saas?.organization?.id || selectedProject?.organization_id || '';
+    if (!organizationId) {
+      toast.error('Organização não encontrada para este projeto');
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      await callFactory({
+        action: 'update_subscription',
+        organization_id: organizationId,
+        plan_code: subscriptionPlan.trim().toLowerCase(),
+        status: subscriptionStatus.trim().toLowerCase(),
+        provider: 'manual',
+      });
+      toast.success('Assinatura atualizada');
+      await Promise.all([loadProjects(), loadProjectStatus(selectedProjectId)]);
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : 'Erro ao atualizar assinatura';
+      toast.error(message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Card>
@@ -440,6 +524,28 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
               value={niche}
               onChange={(e) => setNiche(e.target.value)}
             />
+            <Input
+              placeholder="Organização SaaS (tenant) - ex.: Escola Chef Pro"
+              value={organizationName}
+              onChange={(e) => setOrganizationName(e.target.value)}
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <Input
+                placeholder="Slug da organização (opcional)"
+                value={organizationSlug}
+                onChange={(e) => setOrganizationSlug(e.target.value)}
+              />
+              <Input
+                placeholder="Owner user_id (opcional)"
+                value={ownerUserId}
+                onChange={(e) => setOwnerUserId(e.target.value)}
+              />
+              <Input
+                placeholder="Plano (starter|growth|scale)"
+                value={planCode}
+                onChange={(e) => setPlanCode(e.target.value)}
+              />
+            </div>
             <Input
               placeholder="Público-alvo"
               value={targetAudience}
@@ -590,6 +696,10 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
                 Capital inicial: {selectedProject.initial_capital ? `$${selectedProject.initial_capital}` : 'não informado'}
               </span>
               <span className="flex items-center gap-1.5">
+                <Bot className="h-4 w-4" />
+                Tenant: {statusData?.saas?.organization?.name || selectedProject.organization?.name || 'não definido'}
+              </span>
+              <span className="flex items-center gap-1.5">
                 <ShieldCheck className="h-4 w-4" />
                 QA mínimo: {selectedProject.qa_min_score ?? 75}
               </span>
@@ -643,6 +753,41 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
                   <span>Limite: ${statusData.costs.budget_limit_usd.toFixed(2)}</span>
                   <span>Gasto: ${statusData.costs.budget_spent_usd.toFixed(2)}</span>
                   <span>Saldo: ${statusData.costs.budget_remaining_usd.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
+
+            {statusData?.saas && (
+              <div className="rounded-lg border p-3">
+                <p className="font-medium mb-2">SaaS Tenant + Billing</p>
+                <div className="text-sm grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+                  <span>Organização: {statusData.saas.organization.name}</span>
+                  <span>Slug: {statusData.saas.organization.slug}</span>
+                  <span>Assinatura: {statusData.saas.subscription.status}</span>
+                  <span>Plano: {statusData.saas.plan.plan_name} ({statusData.saas.plan.plan_code})</span>
+                  <span>Limite mensal SaaS: ${Number(statusData.saas.plan.monthly_spend_limit_usd || 0).toFixed(2)}</span>
+                  <span>Gasto mensal SaaS: ${Number(statusData.saas.usage.spend_usd || 0).toFixed(2)}</span>
+                </div>
+                <div className="text-xs text-muted-foreground grid grid-cols-1 md:grid-cols-4 gap-2">
+                  <span>Projetos restantes: {statusData.saas.limits.remaining_projects}</span>
+                  <span>Tarefas restantes: {statusData.saas.limits.remaining_tasks}</span>
+                  <span>Vídeos restantes: {statusData.saas.limits.remaining_videos}</span>
+                  <span>Saldo mensal SaaS: ${Number(statusData.saas.limits.remaining_spend_usd || 0).toFixed(2)}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <Input
+                    placeholder="Plano (starter|growth|scale)"
+                    value={subscriptionPlan}
+                    onChange={(e) => setSubscriptionPlan(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Status (trialing|active|past_due|paused|canceled)"
+                    value={subscriptionStatus}
+                    onChange={(e) => setSubscriptionStatus(e.target.value)}
+                  />
+                  <Button variant="outline" onClick={updateSubscription} disabled={isBusy}>
+                    Atualizar assinatura
+                  </Button>
                 </div>
               </div>
             )}

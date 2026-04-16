@@ -31,6 +31,8 @@ const HUMAN_DEFAULT = {
 const DEFAULT_QA_MIN_SCORE = 75;
 const DEFAULT_BUDGET_RATIO = 0.35;
 const DEFAULT_BUDGET_LIMIT = 300;
+const DEFAULT_PLAN_CODE = "starter";
+const DEFAULT_TRIAL_DAYS = 14;
 
 const TASK_COSTS: Record<string, number> = {
   generate_master_plan: 0.08,
@@ -82,6 +84,8 @@ type TaskStatus = "pending" | "running" | "completed" | "blocked" | "failed";
 
 interface FactoryProject {
   id: string;
+  organization_id: string | null;
+  created_by_user_id: string | null;
   name: string;
   mode: "create_zero" | "takeover";
   status: ProjectStatus;
@@ -138,6 +142,49 @@ interface TaskRunSummary {
   task: FactoryTask | null;
   message: string;
   project_status?: ProjectStatus;
+}
+
+interface SaasPlanLimit {
+  plan_code: string;
+  plan_name: string;
+  max_projects: number;
+  max_members: number;
+  max_videos_per_month: number;
+  max_tasks_per_month: number;
+  monthly_spend_limit_usd: number;
+  supports_white_label: boolean;
+}
+
+interface SaasOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  owner_user_id: string | null;
+}
+
+interface SaasSubscription {
+  id: string;
+  organization_id: string;
+  plan_code: string;
+  status: string;
+  provider: string;
+  trial_ends_at: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  is_current: boolean;
+}
+
+interface SaasUsageMonthly {
+  id: string;
+  organization_id: string;
+  reference_month: string;
+  projects_created: number;
+  tasks_executed: number;
+  videos_generated: number;
+  spend_usd: number;
+  members_added: number;
 }
 
 interface VideoProviderStatus {
@@ -504,6 +551,328 @@ const resolveBudgetLimit = (projectInput: JsonObject) => {
   return DEFAULT_BUDGET_LIMIT;
 };
 
+const monthStartDate = (input: Date = new Date()) => {
+  const utc = new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), 1));
+  return utc.toISOString().slice(0, 10);
+};
+
+const normalizeSlug = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || `tenant-${crypto.randomUUID().slice(0, 8)}`;
+
+const fetchPlanLimit = async (
+  supabase: ReturnType<typeof createClient>,
+  planCodeRaw: unknown,
+) => {
+  const planCode = String(planCodeRaw || DEFAULT_PLAN_CODE).trim().toLowerCase() || DEFAULT_PLAN_CODE;
+  const { data, error } = await supabase
+    .from("saas_plan_limits")
+    .select("*")
+    .eq("plan_code", planCode)
+    .single();
+  if (error) throw new Error(`Plano SaaS não encontrado: ${planCode}`);
+  return data as SaasPlanLimit;
+};
+
+const fetchCurrentSubscription = async (
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string,
+) => {
+  const { data, error } = await supabase
+    .from("saas_subscriptions")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("is_current", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as SaasSubscription | null) || null;
+};
+
+const ensureCurrentUsageRow = async (
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string,
+) => {
+  const month = monthStartDate();
+  const { data, error } = await supabase
+    .from("saas_usage_monthly")
+    .upsert(
+      {
+        organization_id: organizationId,
+        reference_month: month,
+      },
+      {
+        onConflict: "organization_id,reference_month",
+        ignoreDuplicates: false,
+      },
+    )
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as SaasUsageMonthly;
+};
+
+const fetchCurrentUsageRow = async (
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string,
+) => {
+  const month = monthStartDate();
+  const { data, error } = await supabase
+    .from("saas_usage_monthly")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("reference_month", month)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data as SaasUsageMonthly;
+  return ensureCurrentUsageRow(supabase, organizationId);
+};
+
+const incrementSaasUsage = async (
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string,
+  delta: {
+    projects_created?: number;
+    tasks_executed?: number;
+    videos_generated?: number;
+    spend_usd?: number;
+    members_added?: number;
+  },
+) => {
+  const { error } = await supabase.rpc("saas_increment_usage", {
+    p_organization_id: organizationId,
+    p_reference_month: monthStartDate(),
+    p_projects_created: Math.max(0, Math.floor(toNumber(delta.projects_created, 0))),
+    p_tasks_executed: Math.max(0, Math.floor(toNumber(delta.tasks_executed, 0))),
+    p_videos_generated: Math.max(0, Math.floor(toNumber(delta.videos_generated, 0))),
+    p_spend_usd: Math.max(0, toNumber(delta.spend_usd, 0)),
+    p_members_added: Math.max(0, Math.floor(toNumber(delta.members_added, 0))),
+  });
+  if (error) throw error;
+};
+
+const fetchOrganizationById = async (
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string,
+) => {
+  const { data, error } = await supabase
+    .from("saas_organizations")
+    .select("*")
+    .eq("id", organizationId)
+    .single();
+  if (error) throw error;
+  return data as SaasOrganization;
+};
+
+const resolveUniqueOrganizationSlug = async (
+  supabase: ReturnType<typeof createClient>,
+  inputSlug: string,
+) => {
+  const base = normalizeSlug(inputSlug);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const candidate = attempt === 0 ? base : `${base}-${crypto.randomUUID().slice(0, 4)}`;
+    const { data, error } = await supabase
+      .from("saas_organizations")
+      .select("id")
+      .eq("slug", candidate)
+      .limit(1);
+    if (error) throw error;
+    if (!data || data.length === 0) return candidate;
+  }
+  return `${base}-${crypto.randomUUID().slice(0, 8)}`;
+};
+
+const ensureOrganizationProvisioned = async (
+  supabase: ReturnType<typeof createClient>,
+  payload: JsonObject,
+) => {
+  const explicitOrgId = String(payload.organization_id || "").trim();
+  if (explicitOrgId) {
+    const organization = await fetchOrganizationById(supabase, explicitOrgId);
+    const subscription = await fetchCurrentSubscription(supabase, organization.id);
+    if (!subscription) {
+      const { data: createdSub, error: createSubError } = await supabase
+        .from("saas_subscriptions")
+        .insert({
+          organization_id: organization.id,
+          plan_code: DEFAULT_PLAN_CODE,
+          status: "trialing",
+          provider: "manual",
+          trial_ends_at: new Date(Date.now() + DEFAULT_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+          is_current: true,
+        })
+        .select("*")
+        .single();
+      if (createSubError) throw createSubError;
+      await ensureCurrentUsageRow(supabase, organization.id);
+      return {
+        organization,
+        subscription: createdSub as SaasSubscription,
+        created: false,
+      };
+    }
+    await ensureCurrentUsageRow(supabase, organization.id);
+    return {
+      organization,
+      subscription,
+      created: false,
+    };
+  }
+
+  const organizationName = String(payload.organization_name || payload.name || "Nova Escola").trim() || "Nova Escola";
+  const rawSlug = String(payload.organization_slug || organizationName).trim();
+  const ownerUserId = String(payload.owner_user_id || "").trim() || null;
+  const planCode = String(payload.plan_code || DEFAULT_PLAN_CODE).trim().toLowerCase() || DEFAULT_PLAN_CODE;
+  const uniqueSlug = await resolveUniqueOrganizationSlug(supabase, rawSlug || organizationName);
+
+  const { data: org, error: orgError } = await supabase
+    .from("saas_organizations")
+    .insert({
+      name: organizationName,
+      slug: uniqueSlug,
+      status: "active",
+      owner_user_id: ownerUserId,
+      metadata: {
+        provisioned_by: "school-factory",
+        created_at_iso: nowIso(),
+      },
+    })
+    .select("*")
+    .single();
+  if (orgError) throw orgError;
+  const organization = org as SaasOrganization;
+
+  if (ownerUserId) {
+    const { error: membershipError } = await supabase
+      .from("saas_memberships")
+      .upsert(
+        {
+          organization_id: organization.id,
+          user_id: ownerUserId,
+          role: "owner",
+          status: "active",
+          metadata: { source: "auto_provision" },
+        },
+        {
+          onConflict: "organization_id,user_id",
+          ignoreDuplicates: false,
+        },
+      );
+    if (membershipError) throw membershipError;
+  }
+
+  const { data: subscription, error: subError } = await supabase
+    .from("saas_subscriptions")
+    .insert({
+      organization_id: organization.id,
+      plan_code: planCode,
+      status: "trialing",
+      provider: "manual",
+      trial_ends_at: new Date(Date.now() + DEFAULT_TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      is_current: true,
+      metadata: {
+        source: "auto_provision",
+      },
+    })
+    .select("*")
+    .single();
+  if (subError) throw subError;
+
+  await ensureCurrentUsageRow(supabase, organization.id);
+
+  return {
+    organization,
+    subscription: subscription as SaasSubscription,
+    created: true,
+  };
+};
+
+const fetchSaasSummaryByOrganization = async (
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string | null,
+) => {
+  if (!organizationId) return null;
+
+  const organization = await fetchOrganizationById(supabase, organizationId);
+  const subscription = await fetchCurrentSubscription(supabase, organizationId);
+  if (!subscription) return null;
+  const plan = await fetchPlanLimit(supabase, subscription.plan_code);
+  const usage = await fetchCurrentUsageRow(supabase, organizationId);
+
+  const usageSpend = toNumber(usage.spend_usd, 0);
+  const monthlySpendLimit = toNumber(plan.monthly_spend_limit_usd, 0);
+
+  return {
+    organization,
+    subscription,
+    plan,
+    usage,
+    limits: {
+      remaining_projects: Math.max(0, toNumber(plan.max_projects, 0) - toNumber(usage.projects_created, 0)),
+      remaining_tasks: Math.max(0, toNumber(plan.max_tasks_per_month, 0) - toNumber(usage.tasks_executed, 0)),
+      remaining_videos: Math.max(0, toNumber(plan.max_videos_per_month, 0) - toNumber(usage.videos_generated, 0)),
+      remaining_spend_usd: Number(Math.max(0, monthlySpendLimit - usageSpend).toFixed(2)),
+    },
+  };
+};
+
+const ensureProjectCreationQuota = async (
+  supabase: ReturnType<typeof createClient>,
+  organizationId: string,
+) => {
+  const summary = await fetchSaasSummaryByOrganization(supabase, organizationId);
+  if (!summary) throw new Error("Organização/assinatura não encontrada");
+  const blockedStatuses = ["paused", "canceled", "incomplete"];
+  if (blockedStatuses.includes(String(summary.subscription.status || ""))) {
+    throw new Error(`Assinatura não permite criação de projetos (${summary.subscription.status}).`);
+  }
+  if (toNumber(summary.usage.projects_created, 0) >= toNumber(summary.plan.max_projects, 0)) {
+    throw new Error(`Limite mensal de projetos atingido para o plano ${summary.plan.plan_name}.`);
+  }
+  return summary;
+};
+
+const ensureTaskExecutionQuota = async (
+  supabase: ReturnType<typeof createClient>,
+  project: FactoryProject,
+  task: FactoryTask,
+) => {
+  if (!project.organization_id) return { allowed: true, reason: null as string | null };
+  const summary = await fetchSaasSummaryByOrganization(supabase, project.organization_id);
+  if (!summary) return { allowed: true, reason: null as string | null };
+
+  const subscriptionStatus = String(summary.subscription.status || "");
+  if (["paused", "canceled", "incomplete"].includes(subscriptionStatus)) {
+    return {
+      allowed: false,
+      reason: `Assinatura bloqueada (${subscriptionStatus}). Atualize o plano para continuar.`,
+    };
+  }
+
+  if (toNumber(summary.usage.tasks_executed, 0) >= toNumber(summary.plan.max_tasks_per_month, 0)) {
+    return {
+      allowed: false,
+      reason: `Limite mensal de tarefas do plano atingido (${summary.plan.max_tasks_per_month}).`,
+    };
+  }
+
+  if (task.task_type === "video_generation" &&
+    toNumber(summary.usage.videos_generated, 0) >= toNumber(summary.plan.max_videos_per_month, 0)
+  ) {
+    return {
+      allowed: false,
+      reason: `Limite mensal de vídeos atingido (${summary.plan.max_videos_per_month}).`,
+    };
+  }
+
+  return { allowed: true, reason: null as string | null };
+};
+
 const callGrokJson = async (
   systemPrompt: string,
   userPrompt: string,
@@ -685,6 +1054,12 @@ const registerCost = async (
       metadata,
     });
   if (costError) throw costError;
+
+  if (project.organization_id) {
+    await incrementSaasUsage(supabase, project.organization_id, {
+      spend_usd: Number(amountUsd.toFixed(4)),
+    });
+  }
 };
 
 const budgetAllows = (
@@ -1233,6 +1608,24 @@ const executeNextTask = async (
     return { task: null, message: "Nenhuma tarefa pendente", project_status: project.status };
   }
 
+  const quota = await ensureTaskExecutionQuota(supabase, project, task);
+  if (!quota.allowed) {
+    await blockTask(supabase, task.id, quota.reason || "Execução bloqueada por limites do plano SaaS.");
+    await updateProjectAndMirror(supabase, projectId, {
+      status: "blocked",
+      business_context: {
+        ...asObject(project.business_context),
+        saas_quota_block_reason: quota.reason,
+        saas_quota_blocked_at: nowIso(),
+      },
+    });
+    return {
+      task: await fetchTaskById(supabase, task.id),
+      message: quota.reason || "Execução bloqueada por limites do plano SaaS.",
+      project_status: "blocked",
+    };
+  }
+
   await updateTaskAndMirror(supabase, task.id, { status: "running", started_at: nowIso() });
 
   try {
@@ -1718,6 +2111,12 @@ Retorne:
   }
 
   const latestTask = await fetchTaskById(supabase, task.id);
+  if (latestTask.status === "completed" && project.organization_id) {
+    await incrementSaasUsage(supabase, project.organization_id, {
+      tasks_executed: 1,
+      videos_generated: latestTask.task_type === "video_generation" ? 1 : 0,
+    });
+  }
   await mirrorTaskToMongo(latestTask);
   const latestProject = await updateProjectAndMirror(supabase, projectId, {
     last_runner_at: nowIso(),
@@ -1762,6 +2161,151 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    if (action === "provision_organization") {
+      const orgInput = asObject(body.organization);
+      const provisionedOrg = await ensureOrganizationProvisioned(supabase, orgInput);
+      const summary = await fetchSaasSummaryByOrganization(supabase, provisionedOrg.organization.id);
+      return toJsonResponse({
+        organization: provisionedOrg.organization,
+        subscription: provisionedOrg.subscription,
+        saas: summary,
+        created: provisionedOrg.created,
+        message: provisionedOrg.created
+          ? "Organização provisionada com sucesso"
+          : "Organização localizada e atualizada",
+      });
+    }
+
+    if (action === "list_organizations") {
+      const { data: orgsRaw, error: orgsError } = await supabase
+        .from("saas_organizations")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (orgsError) throw orgsError;
+
+      const organizations = asArray<SaasOrganization>(orgsRaw);
+      const enriched = await Promise.all(organizations.map(async (organization) => {
+        const summary = await fetchSaasSummaryByOrganization(supabase, organization.id);
+        const { count: membersCount, error: membersError } = await supabase
+          .from("saas_memberships")
+          .select("*", { count: "exact", head: true })
+          .eq("organization_id", organization.id)
+          .eq("status", "active");
+        if (membersError) throw membersError;
+
+        const { count: projectsCount, error: projectsCountError } = await supabase
+          .from("school_factory_projects")
+          .select("*", { count: "exact", head: true })
+          .eq("organization_id", organization.id);
+        if (projectsCountError) throw projectsCountError;
+
+        return {
+          ...organization,
+          members_active: membersCount || 0,
+          projects_total: projectsCount || 0,
+          subscription: summary?.subscription || null,
+          plan: summary?.plan || null,
+          usage: summary?.usage || null,
+          limits: summary?.limits || null,
+        };
+      }));
+
+      return toJsonResponse({
+        organizations: enriched,
+        message: "Organizações carregadas",
+      });
+    }
+
+    if (action === "upsert_membership") {
+      const organizationId = String(body.organization_id || "").trim();
+      const userId = String(body.user_id || "").trim();
+      const role = String(body.role || "student").trim().toLowerCase();
+      const status = String(body.status || "active").trim().toLowerCase();
+      if (!organizationId || !userId) {
+        return toJsonResponse({ error: "organization_id e user_id são obrigatórios" }, 400);
+      }
+
+      const allowedRoles = ["owner", "admin", "manager", "instructor", "student"];
+      if (!allowedRoles.includes(role)) {
+        return toJsonResponse({ error: `role inválido. Use: ${allowedRoles.join(", ")}` }, 400);
+      }
+
+      const { data, error } = await supabase
+        .from("saas_memberships")
+        .upsert({
+          organization_id: organizationId,
+          user_id: userId,
+          role,
+          status,
+          invited_email: body.invited_email || null,
+          invited_by: body.invited_by || null,
+          metadata: asObject(body.metadata),
+        }, {
+          onConflict: "organization_id,user_id",
+          ignoreDuplicates: false,
+        })
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      return toJsonResponse({
+        membership: data,
+        message: "Membership atualizada",
+      });
+    }
+
+    if (action === "update_subscription") {
+      const organizationId = String(body.organization_id || "").trim();
+      if (!organizationId) {
+        return toJsonResponse({ error: "organization_id é obrigatório" }, 400);
+      }
+      const planCode = String(body.plan_code || DEFAULT_PLAN_CODE).trim().toLowerCase();
+      const nextStatus = String(body.status || "active").trim().toLowerCase();
+      const allowedStatuses = ["trialing", "active", "past_due", "paused", "canceled", "incomplete"];
+      if (!allowedStatuses.includes(nextStatus)) {
+        return toJsonResponse({ error: `status inválido. Use: ${allowedStatuses.join(", ")}` }, 400);
+      }
+
+      await fetchPlanLimit(supabase, planCode);
+
+      const currentSubscription = await fetchCurrentSubscription(supabase, organizationId);
+      if (currentSubscription) {
+        const { error: disableCurrentError } = await supabase
+          .from("saas_subscriptions")
+          .update({ is_current: false, updated_at: nowIso() })
+          .eq("id", currentSubscription.id);
+        if (disableCurrentError) throw disableCurrentError;
+      }
+
+      const { data, error } = await supabase
+        .from("saas_subscriptions")
+        .insert({
+          organization_id: organizationId,
+          plan_code: planCode,
+          status: nextStatus,
+          provider: body.provider || "manual",
+          provider_customer_id: body.provider_customer_id || null,
+          provider_subscription_id: body.provider_subscription_id || null,
+          trial_ends_at: body.trial_ends_at || null,
+          current_period_start: body.current_period_start || null,
+          current_period_end: body.current_period_end || null,
+          cancel_at_period_end: Boolean(body.cancel_at_period_end || false),
+          is_current: true,
+          metadata: asObject(body.metadata),
+        })
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      const summary = await fetchSaasSummaryByOrganization(supabase, organizationId);
+      return toJsonResponse({
+        subscription: data,
+        saas: summary,
+        message: "Assinatura atualizada",
+      });
+    }
+
     if (action === "create_project") {
       const projectInput = asObject(body.project);
       const name = String(projectInput.name || "").trim();
@@ -1787,6 +2331,12 @@ serve(async (req) => {
         );
       }
 
+      const provisionedOrg = await ensureOrganizationProvisioned(supabase, {
+        ...projectInput,
+        name,
+      });
+      const saasQuota = await ensureProjectCreationQuota(supabase, provisionedOrg.organization.id);
+
       const budgetLimit = resolveBudgetLimit(projectInput);
       const qaMin = Math.max(0, Math.min(100, Math.round(toNumber(projectInput.qa_min_score, DEFAULT_QA_MIN_SCORE))));
       const initialCapitalInput = projectInput.initial_capital ?? projectInput.initial_capital_usd;
@@ -1797,7 +2347,9 @@ serve(async (req) => {
       const { data: createdProjectRaw, error: projectError } = await supabase
         .from("school_factory_projects")
         .insert({
-          owner_id: projectInput.owner_id || null,
+          owner_id: projectInput.owner_id || provisionedOrg.organization.owner_user_id || null,
+          created_by_user_id: projectInput.owner_user_id || provisionedOrg.organization.owner_user_id || null,
+          organization_id: provisionedOrg.organization.id,
           name,
           mode: normalizeProjectMode(projectInput.mode),
           initial_capital: initialCapital,
@@ -1828,6 +2380,7 @@ serve(async (req) => {
 
       const createdProject = createdProjectRaw as FactoryProject;
       await mirrorProjectToMongo(createdProject);
+      await incrementSaasUsage(supabase, provisionedOrg.organization.id, { projects_created: 1 });
       if (initialDocuments.length > 0) {
         const rows = initialDocuments.map((doc, index) => ({
           project_id: createdProject.id,
@@ -1843,7 +2396,16 @@ serve(async (req) => {
         if (docsError) throw docsError;
       }
 
-      return toJsonResponse({ project: createdProject, message: "Projeto da escola criado com sucesso" });
+      return toJsonResponse({
+        project: createdProject,
+        organization: provisionedOrg.organization,
+        subscription: provisionedOrg.subscription,
+        plan: saasQuota.plan,
+        usage_month: saasQuota.usage,
+        message: provisionedOrg.created
+          ? "Projeto criado e organização provisionada automaticamente"
+          : "Projeto da escola criado com sucesso",
+      });
     }
 
     if (action === "attach_documents") {
@@ -1881,14 +2443,52 @@ serve(async (req) => {
     }
 
     if (action === "list_projects") {
-      const { data: projectsRaw, error } = await supabase
+      const organizationIdFilter = String(body.organization_id || "").trim();
+      const organizationSlugRaw = String(body.organization_slug || "").trim();
+      const organizationSlugFilter = organizationSlugRaw ? normalizeSlug(organizationSlugRaw) : "";
+
+      let resolvedOrganizationId = organizationIdFilter;
+      if (!resolvedOrganizationId && organizationSlugFilter) {
+        const { data: orgBySlug, error: orgBySlugError } = await supabase
+          .from("saas_organizations")
+          .select("id")
+          .eq("slug", organizationSlugFilter)
+          .maybeSingle();
+        if (orgBySlugError) throw orgBySlugError;
+        resolvedOrganizationId = String(orgBySlug?.id || "").trim();
+        if (!resolvedOrganizationId) {
+          return toJsonResponse({ projects: [] });
+        }
+      }
+
+      let query = supabase
         .from("school_factory_projects")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(40);
+      if (resolvedOrganizationId) {
+        query = query.eq("organization_id", resolvedOrganizationId);
+      }
+
+      const { data: projectsRaw, error } = await query;
       if (error) throw error;
 
       const projects = asArray<FactoryProject>(projectsRaw);
+      const organizationIds = projects
+        .map((project) => String(project.organization_id || ""))
+        .filter((value) => value.length > 0);
+      let organizationsById: Record<string, SaasOrganization> = {};
+      if (organizationIds.length > 0) {
+        const { data: orgsRaw, error: orgsError } = await supabase
+          .from("saas_organizations")
+          .select("id, name, slug, status, owner_user_id")
+          .in("id", organizationIds);
+        if (orgsError) throw orgsError;
+        organizationsById = asArray<SaasOrganization>(orgsRaw).reduce<Record<string, SaasOrganization>>((acc, org) => {
+          acc[org.id] = org;
+          return acc;
+        }, {});
+      }
       const enriched = await Promise.all(
         projects.map(async (project) => {
           const { data: tasksRaw, error: tasksError } = await supabase
@@ -1922,6 +2522,7 @@ serve(async (req) => {
 
           return {
             ...project,
+            organization: project.organization_id ? organizationsById[String(project.organization_id)] || null : null,
             metrics,
             sla: {
               overdue_tasks: overdueTasks,
@@ -2478,12 +3079,14 @@ Retorne JSON no formato:
         .order("version", { ascending: false })
         .limit(20);
       if (versionsError) throw versionsError;
+      const saas = await fetchSaasSummaryByOrganization(supabase, project.organization_id);
 
       return toJsonResponse({
         project,
         metrics,
         tasks,
         handoffs_open: handoffsOpen,
+        saas,
         domain_store: getDomainStoreInfo(),
         sla: {
           overdue_tasks: overdueTasks,
@@ -2505,6 +3108,17 @@ Retorne JSON no formato:
       return toJsonResponse({
         domain_store: getDomainStoreInfo(),
         message: "Status do backend de domínio",
+      });
+    }
+
+    if (action === "organization_status") {
+      const organizationId = String(body.organization_id || "").trim();
+      if (!organizationId) return toJsonResponse({ error: "organization_id é obrigatório" }, 400);
+      const saas = await fetchSaasSummaryByOrganization(supabase, organizationId);
+      if (!saas) return toJsonResponse({ error: "Organização não encontrada" }, 404);
+      return toJsonResponse({
+        saas,
+        message: "Status da organização",
       });
     }
 

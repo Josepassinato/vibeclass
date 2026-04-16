@@ -23,13 +23,15 @@ interface ChatMessage {
 }
 
 interface TranscriptChatProps {
+  /** Current video UUID for transcript search */
+  videoId: string;
   /** Optional callback when user clicks "Ir para o momento" */
   onNavigateToMoment?: (videoId: string, chunkIndex: number) => void;
   /** Map of video IDs to display titles */
   videoTitles?: Record<string, string>;
 }
 
-export function TranscriptChat({ onNavigateToMoment, videoTitles }: TranscriptChatProps) {
+export function TranscriptChat({ videoId, onNavigateToMoment, videoTitles }: TranscriptChatProps) {
   const { config, labels } = useBranding();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -72,14 +74,14 @@ export function TranscriptChat({ onNavigateToMoment, videoTitles }: TranscriptCh
     try {
       // Step 1: RAG search via pgvector
       const { data, error } = await supabase.functions.invoke('search-transcript', {
-        body: { query },
+        body: { query, video_id: videoId },
       });
 
       if (error) {
         throw new Error(error.message || 'Erro ao buscar transcrições');
       }
 
-      const results: SearchResult[] = data?.results ?? [];
+      const results: SearchResult[] = data?.chunks ?? [];
 
       let responseText: string;
       if (results.length === 0) {
