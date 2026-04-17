@@ -1,0 +1,58 @@
+name: E2E · html_composition
+
+on:
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Create artifacts dir
+        run: mkdir -p artifacts
+
+      - name: Run E2E composition spec
+        env:
+          E2E_BASE_URL: https://whitelabel.12brain.org
+          ADMIN_PASSWORD: ${{ secrets.SCHOOL_FACTORY_ADMIN_PASSWORD }}
+        run: npx playwright test tests/e2e/composition.spec.ts --reporter=list
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: composition-screenshots
+          path: artifacts/
+          if-no-files-found: warn
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: warn
+
+      - name: Upload Playwright traces / videos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: test-results/
+          if-no-files-found: ignore
