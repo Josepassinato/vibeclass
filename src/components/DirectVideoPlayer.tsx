@@ -6,13 +6,10 @@ import { Slider } from '@/components/ui/slider';
 import { VideoTimeline } from '@/components/VideoTimeline';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Volume1, Maximize, Minimize, PictureInPicture2 } from 'lucide-react';
 
-export interface DirectVideoPlayerRef {
-  play: () => void;
-  pause: () => void;
+import type { UnifiedLessonPlayerHandle } from '@/lib/players/unified-player';
+
+export interface DirectVideoPlayerRef extends UnifiedLessonPlayerHandle {
   restart: () => void;
-  seekTo: (seconds: number) => void;
-  getCurrentTime: () => number;
-  isPaused: () => boolean;
   unlockPlayback: () => void;
 }
 
@@ -156,6 +153,10 @@ export const DirectVideoPlayer = forwardRef<DirectVideoPlayerRef, DirectVideoPla
       },
       getCurrentTime: () => {
         return videoRef.current?.currentTime || 0;
+      },
+      getDuration: () => {
+        const d = videoRef.current?.duration;
+        return Number.isFinite(d) ? (d as number) : 0;
       },
       isPaused: () => {
         return videoRef.current?.paused ?? true;

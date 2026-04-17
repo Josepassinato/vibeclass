@@ -39,6 +39,7 @@ interface SavedVideo {
   youtube_id: string | null;
   video_url: string | null;
   video_type: string | null;
+  composition_json?: unknown;
   title: string;
   transcript: string | null;
   analysis: string | null;
@@ -57,6 +58,7 @@ interface VideoInfo {
   videoId: string | null;
   videoUrl: string | null;
   videoType: string | null;
+  compositionJson?: unknown;
   dbId: string;
   title: string;
   author: string;
@@ -184,6 +186,7 @@ const Student = () => {
       videoId: video.youtube_id,
       videoUrl: video.video_url,
       videoType: video.video_type,
+      compositionJson: video.composition_json,
       dbId: video.id,
       title: video.title,
       author: '',
@@ -499,6 +502,7 @@ const Student = () => {
                     videoId={selectedVideo.videoId}
                     videoUrl={selectedVideo.videoUrl}
                     videoType={selectedVideo.videoType}
+                    compositionJson={selectedVideo.compositionJson}
                     videoDbId={selectedVideo.dbId}
                     videoTitle={selectedVideo.title}
                     moduleTitle={currentLesson?.module_id ? modules.find(m => m.id === currentLesson.module_id)?.title : undefined}

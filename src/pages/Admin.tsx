@@ -21,6 +21,8 @@ import { ModulesAdmin } from '@/components/ModulesAdmin';
 import { NarrativeLibrary } from '@/components/NarrativeLibrary';
 import { WhiteLabelSettings } from '@/components/WhiteLabelSettings';
 import { SchoolFactoryPanel } from '@/components/SchoolFactoryPanel';
+import { CompositionAdminEditor } from '@/components/composition/CompositionAdminEditor';
+import type { LessonComposition } from '@/lib/composition/types';
 import { Switch } from '@/components/ui/switch';
 import { useBranding } from '@/branding';
 
@@ -69,11 +71,13 @@ export default function Admin() {
   
   // Form states for new lesson
   const [newVideoUrl, setNewVideoUrl] = useState('');
-  const [newVideoType, setNewVideoType] = useState<'youtube' | 'direct' | 'external'>('youtube');
+  const [newVideoType, setNewVideoType] = useState<'youtube' | 'direct' | 'external' | 'html_composition'>('youtube');
   const [newVideoTitle, setNewVideoTitle] = useState('');
   const [newVideoDescription, setNewVideoDescription] = useState('');
   const [newVideoDuration, setNewVideoDuration] = useState('');
   const [newVideoTranscript, setNewVideoTranscript] = useState('');
+  const [newCompositionJson, setNewCompositionJson] = useState('');
+  const [newCompositionValid, setNewCompositionValid] = useState<LessonComposition | null>(null);
   
   // Form states for editing
   const [editTitle, setEditTitle] = useState('');
@@ -142,6 +146,7 @@ export default function Admin() {
   const handleAddLesson = async () => {
     let youtubeId: string | null = null;
     let videoUrl: string | null = null;
+    let compositionPayload: LessonComposition | null = null;
 
     if (newVideoType === 'youtube') {
       youtubeId = extractYoutubeId(newVideoUrl);
@@ -149,6 +154,12 @@ export default function Admin() {
         toast.error('URL do YouTube inválida');
         return;
       }
+    } else if (newVideoType === 'html_composition') {
+      if (!newCompositionValid) {
+        toast.error('Composição JSON inválida — corrija os erros antes de salvar.');
+        return;
+      }
+      compositionPayload = newCompositionValid;
     } else {
       if (!newVideoUrl.trim()) {
         toast.error('URL do vídeo é obrigatória');
@@ -176,6 +187,7 @@ export default function Admin() {
             description: newVideoDescription.trim() || null,
             duration_minutes: newVideoDuration ? parseInt(newVideoDuration) : null,
             transcript: newVideoTranscript.trim() || null,
+            composition_json: compositionPayload,
             lesson_order: lessons.length + 1,
             is_configured: false,
           }
@@ -307,6 +319,8 @@ export default function Admin() {
     setNewVideoDescription('');
     setNewVideoDuration('');
     setNewVideoTranscript('');
+    setNewCompositionJson('');
+    setNewCompositionValid(null);
   };
 
   const addEmptyMoment = () => {
@@ -701,8 +715,8 @@ export default function Admin() {
           <div className="space-y-4 py-4">
             {/* Video Type Selection */}
             <div className="space-y-2">
-              <Label>Tipo de Vídeo *</Label>
-              <div className="flex gap-2">
+              <Label>Tipo de Mídia *</Label>
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant={newVideoType === 'youtube' ? 'default' : 'outline'}
@@ -727,26 +741,42 @@ export default function Admin() {
                 >
                   Link Direto (MP4)
                 </Button>
+                <Button
+                  type="button"
+                  variant={newVideoType === 'html_composition' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setNewVideoType('html_composition')}
+                >
+                  HTML Composition
+                </Button>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>{newVideoType === 'youtube' ? 'URL do YouTube *' : 'URL do Vídeo *'}</Label>
-              <Input
-                placeholder={newVideoType === 'youtube' 
-                  ? 'https://www.youtube.com/watch?v=...' 
-                  : newVideoType === 'external'
-                  ? 'https://app.heygen.com/share/...'
-                  : 'https://storage.example.com/video.mp4'
-                }
-                value={newVideoUrl}
-                onChange={(e) => setNewVideoUrl(e.target.value)}
+            {newVideoType === 'html_composition' ? (
+              <CompositionAdminEditor
+                value={newCompositionJson}
+                onChange={setNewCompositionJson}
+                onValidChange={setNewCompositionValid}
               />
-              {newVideoType !== 'youtube' && (
-                <p className="text-xs text-muted-foreground">
-                  Cole a URL completa do vídeo. Para HeyGen, use o link de compartilhamento.
-                </p>
-              )}
-            </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>{newVideoType === 'youtube' ? 'URL do YouTube *' : 'URL do Vídeo *'}</Label>
+                <Input
+                  placeholder={newVideoType === 'youtube'
+                    ? 'https://www.youtube.com/watch?v=...'
+                    : newVideoType === 'external'
+                    ? 'https://app.heygen.com/share/...'
+                    : 'https://storage.example.com/video.mp4'
+                  }
+                  value={newVideoUrl}
+                  onChange={(e) => setNewVideoUrl(e.target.value)}
+                />
+                {newVideoType !== 'youtube' && (
+                  <p className="text-xs text-muted-foreground">
+                    Cole a URL completa do vídeo. Para HeyGen, use o link de compartilhamento.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Título da Aula *</Label>
               <Input

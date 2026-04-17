@@ -703,6 +703,7 @@ export type Database = {
       videos: {
         Row: {
           analysis: string | null
+          composition_json: Json | null
           created_at: string
           description: string | null
           duration_minutes: number | null
@@ -723,6 +724,7 @@ export type Database = {
         }
         Insert: {
           analysis?: string | null
+          composition_json?: Json | null
           created_at?: string
           description?: string | null
           duration_minutes?: number | null
@@ -743,6 +745,7 @@ export type Database = {
         }
         Update: {
           analysis?: string | null
+          composition_json?: Json | null
           created_at?: string
           description?: string | null
           duration_minutes?: number | null

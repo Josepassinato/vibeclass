@@ -13,6 +13,10 @@ import { useStudentMemory, StudentProfile } from '@/hooks/useStudentMemory';
 import { useTutorMemory } from '@/hooks/useTutorMemory';
 import { VideoPlayer, VideoPlayerRef } from './VideoPlayer';
 import { DirectVideoPlayer, DirectVideoPlayerRef } from './DirectVideoPlayer';
+import { CompositionPlayer } from './CompositionPlayer';
+import type { UnifiedLessonPlayerHandle } from '@/lib/players/unified-player';
+import { validateComposition } from '@/lib/composition/validation';
+import type { LessonComposition } from '@/lib/composition/types';
 import { VoiceIndicator } from './VoiceIndicator';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import { MiniQuiz } from './MiniQuiz';
@@ -35,7 +39,9 @@ interface VoiceChatProps {
   videoContext?: string;
   videoId?: string | null; // YouTube ID
   videoUrl?: string | null; // Direct video URL
-  videoType?: string | null; // 'youtube' | 'direct' | 'external'
+  videoType?: string | null; // 'youtube' | 'direct' | 'external' | 'html_composition'
+  /** Raw composition JSON (object or string) when videoType === 'html_composition'. */
+  compositionJson?: unknown;
   videoDbId?: string; // UUID for database queries (quizzes, progress)
   videoTitle?: string;
   moduleTitle?: string;
@@ -49,7 +55,7 @@ interface VoiceChatProps {
   onVideoStarted?: () => void;
 }
 
-export function VoiceChat({ videoContext, videoId, videoUrl, videoType, videoDbId, videoTitle, moduleTitle, videoTranscript, preConfiguredMoments, teacherIntro, onContentPlanReady, onOpenMissions, onVideoEnded, onVideoStarted }: VoiceChatProps) {
+export function VoiceChat({ videoContext, videoId, videoUrl, videoType, compositionJson, videoDbId, videoTitle, moduleTitle, videoTranscript, preConfiguredMoments, teacherIntro, onContentPlanReady, onOpenMissions, onVideoEnded, onVideoStarted }: VoiceChatProps) {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState('');
@@ -69,7 +75,10 @@ export function VoiceChat({ videoContext, videoId, videoUrl, videoType, videoDbI
   const [captionText, setCaptionText] = useState('');
   const { captionsEnabled, toggleCaptions } = useCaptions();
   const { buildInterventionPrompt } = useContextualIntervention();
-  const videoPlayerRef = useRef<VideoPlayerRef | DirectVideoPlayerRef>(null);
+  // Unified ref — narrow types still flow through to each concrete player below
+  // via the `as` cast, but callers (play/pause/seek logic below) use the
+  // common `UnifiedLessonPlayerHandle` surface.
+  const videoPlayerRef = useRef<UnifiedLessonPlayerHandle>(null);
   const timeCheckIntervalRef = useRef<number | null>(null);
   const lastCheckedMomentRef = useRef<number>(-1);
   const analyzedVideoRef = useRef<string | null>(null);
@@ -169,9 +178,25 @@ export function VoiceChat({ videoContext, videoId, videoUrl, videoType, videoDbI
   }, [videoDbId, loadMissions]);
 
 
-  // Determine if we have a video to display
-  const hasVideo = videoId || videoUrl;
+  // Parse composition payload once so the validation error surfaces early and
+  // we avoid re-parsing on every render. Invalid JSON yields `null` and falls
+  // back to the default no-media behaviour without crashing.
+  const parsedComposition = useMemo<LessonComposition | null>(() => {
+    if (videoType !== 'html_composition' || compositionJson == null) return null;
+    const result = validateComposition(compositionJson as unknown);
+    if (!result.valid) {
+      if (import.meta.env.DEV) {
+        console.warn('[VoiceChat] Invalid composition JSON:', result.errors);
+      }
+      return null;
+    }
+    return result.composition;
+  }, [videoType, compositionJson]);
+
+  const isComposition = videoType === 'html_composition' && parsedComposition !== null;
   const isDirectVideo = videoType === 'direct' || videoType === 'external';
+  // Determine if we have a lesson to display (any media kind)
+  const hasVideo = Boolean(videoId || videoUrl || isComposition);
 
   // Load pre-configured moments or analyze content when video changes
   useEffect(() => {
@@ -1065,9 +1090,19 @@ INSTRUÇÕES:
               : 'h-[calc(85vh-54px)]'
           }`}>
             <div className="h-full">
-              {isDirectVideo && videoUrl ? (
+              {isComposition && parsedComposition ? (
+                <CompositionPlayer
+                  ref={videoPlayerRef}
+                  composition={parsedComposition}
+                  autoPlay={false}
+                  onPlay={handleManualPlay}
+                  onPause={handleManualPause}
+                  onSeek={handleManualSeek}
+                  onEnded={handleVideoEnded}
+                />
+              ) : isDirectVideo && videoUrl ? (
                 <DirectVideoPlayer
-                  ref={videoPlayerRef as React.RefObject<DirectVideoPlayerRef>}
+                  ref={videoPlayerRef as unknown as React.RefObject<DirectVideoPlayerRef>}
                   videoUrl={videoUrl}
                   title={videoTitle}
                   expanded={isVideoExpanded}
@@ -1078,7 +1113,7 @@ INSTRUÇÕES:
                 />
               ) : videoId ? (
                 <VideoPlayer
-                  ref={videoPlayerRef as React.RefObject<VideoPlayerRef>}
+                  ref={videoPlayerRef as unknown as React.RefObject<VideoPlayerRef>}
                   videoId={videoId}
                   title={videoTitle}
                   expanded={isVideoExpanded}

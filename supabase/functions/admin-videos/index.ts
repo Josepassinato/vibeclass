@@ -45,11 +45,12 @@ serve(async (req) => {
         }
 
         const videoType = video.video_type || "youtube";
-        if (!["youtube", "direct", "external"].includes(videoType)) {
+        if (!["youtube", "direct", "external", "html_composition"].includes(videoType)) {
           throw new Error("video_type inválido");
         }
         const youtubeId = video.youtube_id || null;
         const videoUrl = video.video_url || null;
+        const compositionJson = video.composition_json ?? null;
 
         if (videoType === "youtube" && !youtubeId) {
           throw new Error("youtube_id é obrigatório para vídeos do YouTube");
@@ -59,12 +60,17 @@ serve(async (req) => {
           throw new Error("video_url é obrigatório para vídeos diretos ou externos");
         }
 
+        if (videoType === "html_composition" && !compositionJson) {
+          throw new Error("composition_json é obrigatório para aulas html_composition");
+        }
+
         const { data, error } = await supabase
           .from("videos")
           .insert({
             youtube_id: youtubeId,
             video_url: videoUrl,
             video_type: videoType,
+            composition_json: compositionJson,
             title: video.title,
             transcript: video.transcript || null,
             analysis: video.analysis || null,
@@ -94,7 +100,7 @@ serve(async (req) => {
           throw new Error("id é obrigatório para atualização");
         }
 
-        if (video.video_type !== undefined && !["youtube", "direct", "external"].includes(video.video_type)) {
+        if (video.video_type !== undefined && !["youtube", "direct", "external", "html_composition"].includes(video.video_type)) {
           throw new Error("video_type inválido");
         }
 
@@ -114,6 +120,7 @@ serve(async (req) => {
         if (video.youtube_id !== undefined) updateData.youtube_id = video.youtube_id;
         if (video.video_url !== undefined) updateData.video_url = video.video_url;
         if (video.video_type !== undefined) updateData.video_type = video.video_type;
+        if (video.composition_json !== undefined) updateData.composition_json = video.composition_json;
 
         const { data, error } = await supabase
           .from("videos")

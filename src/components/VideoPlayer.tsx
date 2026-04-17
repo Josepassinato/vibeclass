@@ -5,13 +5,11 @@ import { Slider } from '@/components/ui/slider';
 import { VideoTimeline } from '@/components/VideoTimeline';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Volume1, Maximize, Minimize } from 'lucide-react';
 
-export interface VideoPlayerRef {
-  play: () => void;
-  pause: () => void;
+import type { UnifiedLessonPlayerHandle } from '@/lib/players/unified-player';
+
+export interface VideoPlayerRef extends UnifiedLessonPlayerHandle {
+  /** Reset playhead to 0 and start playing. YouTube-specific convenience. */
   restart: () => void;
-  seekTo: (seconds: number) => void;
-  getCurrentTime: () => number;
-  isPaused: () => boolean;
   /**
    * Must be called from a real user gesture (e.g. click) to unlock programmatic playback.
    * This removes the "Clique para habilitar" overlay.
@@ -235,6 +233,9 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(
         },
         getCurrentTime: () => {
           return playerRef.current?.getCurrentTime?.() || 0;
+        },
+        getDuration: () => {
+          return playerRef.current?.getDuration?.() || duration || 0;
         },
         isPaused: () => {
           // Check player state directly for more accurate status
