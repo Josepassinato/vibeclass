@@ -22,7 +22,9 @@ import { NarrativeLibrary } from '@/components/NarrativeLibrary';
 import { WhiteLabelSettings } from '@/components/WhiteLabelSettings';
 import { SchoolFactoryPanel } from '@/components/SchoolFactoryPanel';
 import { CompositionAdminEditor } from '@/components/composition/CompositionAdminEditor';
+import { CompositionPlayer } from '@/components/CompositionPlayer';
 import type { LessonComposition } from '@/lib/composition/types';
+import { validateComposition } from '@/lib/composition/validation';
 import { Switch } from '@/components/ui/switch';
 import { useBranding } from '@/branding';
 
@@ -36,7 +38,10 @@ interface TeachingMoment {
 
 interface VideoLesson {
   id: string;
-  youtube_id: string;
+  youtube_id: string | null;
+  video_url: string | null;
+  video_type: 'youtube' | 'direct' | 'external' | 'html_composition' | null;
+  composition_json: unknown | null;
   title: string;
   transcript: string | null;
   analysis: string | null;
@@ -50,6 +55,8 @@ interface VideoLesson {
   is_released: boolean;
   teacher_intro: string | null;
 }
+
+type EditableVideoType = 'youtube' | 'direct' | 'external' | 'html_composition';
 
 export default function Admin() {
   type AdminSection = 'lessons' | 'missions' | 'modules' | 'library' | 'branding' | 'factory';
@@ -87,6 +94,13 @@ export default function Admin() {
   const [editAnalysis, setEditAnalysis] = useState('');
   const [editMoments, setEditMoments] = useState<TeachingMoment[]>([]);
   const [editTeacherIntro, setEditTeacherIntro] = useState('');
+  // Media editing — tracked so admin can fix a stale URL or switch media mode
+  // without having to recreate the lesson. Integrity rules are enforced at
+  // save-time in handleUpdateLesson (see below).
+  const [editVideoType, setEditVideoType] = useState<EditableVideoType>('youtube');
+  const [editMediaUrl, setEditMediaUrl] = useState('');
+  const [editCompositionJson, setEditCompositionJson] = useState('');
+  const [editCompositionValid, setEditCompositionValid] = useState<LessonComposition | null>(null);
 
   useEffect(() => {
     if (!isWhiteLabelProduct && adminSection === 'branding') {
@@ -211,10 +225,40 @@ export default function Admin() {
   const handleUpdateLesson = async () => {
     if (!selectedLesson) return;
 
+    // Media integrity: derive canonical payload for each mode. We always send
+    // ALL THREE media fields so the backend can null out the previous mode's
+    // data — this prevents a YouTube lesson that was switched to composition
+    // from retaining a stale youtube_id in the DB.
+    let payloadYoutubeId: string | null = null;
+    let payloadVideoUrl: string | null = null;
+    let payloadCompositionJson: LessonComposition | null = null;
+
+    if (editVideoType === 'youtube') {
+      const extracted = extractYoutubeId(editMediaUrl);
+      if (!extracted) {
+        toast.error('URL do YouTube inválida');
+        return;
+      }
+      payloadYoutubeId = extracted;
+    } else if (editVideoType === 'direct' || editVideoType === 'external') {
+      const trimmed = editMediaUrl.trim();
+      if (!trimmed) {
+        toast.error('URL do vídeo é obrigatória');
+        return;
+      }
+      payloadVideoUrl = trimmed;
+    } else if (editVideoType === 'html_composition') {
+      if (!editCompositionValid) {
+        toast.error('Composição JSON inválida — corrija os erros antes de salvar.');
+        return;
+      }
+      payloadCompositionJson = editCompositionValid;
+    }
+
     setIsLoading(true);
     try {
       const isFullyConfigured = !!(editTranscript.trim() && editMoments.length > 0);
-      
+
       const { data, error } = await supabase.functions.invoke('admin-videos', {
         body: {
           action: 'update',
@@ -229,6 +273,10 @@ export default function Admin() {
             teaching_moments: editMoments,
             is_configured: isFullyConfigured,
             teacher_intro: editTeacherIntro.trim() || null,
+            video_type: editVideoType,
+            youtube_id: payloadYoutubeId,
+            video_url: payloadVideoUrl,
+            composition_json: payloadCompositionJson,
           }
         }
       });
@@ -308,6 +356,47 @@ export default function Admin() {
     setEditAnalysis(lesson.analysis || '');
     setEditMoments(lesson.teaching_moments || []);
     setEditTeacherIntro(lesson.teacher_intro || '');
+
+    // Hydrate media editors. For existing rows we may have only one of
+    // youtube_id / video_url / composition_json — show whichever is set,
+    // but normalize video_type to a known value so the mode buttons reflect
+    // reality.
+    const resolvedType: EditableVideoType =
+      lesson.video_type === 'direct' ||
+      lesson.video_type === 'external' ||
+      lesson.video_type === 'html_composition' ||
+      lesson.video_type === 'youtube'
+        ? lesson.video_type
+        : lesson.youtube_id
+          ? 'youtube'
+          : lesson.video_url
+            ? 'direct'
+            : 'youtube';
+    setEditVideoType(resolvedType);
+
+    if (resolvedType === 'youtube') {
+      setEditMediaUrl(
+        lesson.youtube_id ? `https://www.youtube.com/watch?v=${lesson.youtube_id}` : ''
+      );
+    } else if (resolvedType === 'direct' || resolvedType === 'external') {
+      setEditMediaUrl(lesson.video_url || '');
+    } else {
+      setEditMediaUrl('');
+    }
+
+    if (resolvedType === 'html_composition' && lesson.composition_json != null) {
+      const raw =
+        typeof lesson.composition_json === 'string'
+          ? lesson.composition_json
+          : JSON.stringify(lesson.composition_json, null, 2);
+      setEditCompositionJson(raw);
+      const parsed = validateComposition(lesson.composition_json as unknown);
+      setEditCompositionValid(parsed.valid ? parsed.composition : null);
+    } else {
+      setEditCompositionJson('');
+      setEditCompositionValid(null);
+    }
+
     setActiveTab('info');
     setIsEditDialogOpen(true);
   };
@@ -936,19 +1025,117 @@ export default function Admin() {
                   </p>
                 </div>
                 
-                {/* Preview */}
-                {selectedLesson && (
-                  <div className="mt-4 p-4 bg-muted/50 rounded-lg">
-                    <h4 className="text-sm font-medium mb-2">Pré-visualização</h4>
-                    <div className="aspect-video bg-black rounded overflow-hidden">
-                      <iframe
-                        src={`https://www.youtube.com/embed/${selectedLesson.youtube_id}`}
-                        className="w-full h-full"
-                        allowFullScreen
-                      />
+                {/* Media mode editor — admin can fix URL/composition and
+                    switch media type for an existing lesson. Save enforces
+                    integrity so stale fields from the previous mode are
+                    cleared in the DB. */}
+                <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
+                  <div>
+                    <Label className="text-sm font-medium">Tipo de mídia</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                      Ao trocar o tipo, os campos antigos (YouTube ID, URL ou composição) são
+                      limpos no banco ao salvar. Confirme a nova mídia antes de confirmar.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={editVideoType === 'youtube' ? 'default' : 'outline'}
+                        onClick={() => setEditVideoType('youtube')}
+                      >
+                        YouTube
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={editVideoType === 'external' ? 'default' : 'outline'}
+                        onClick={() => setEditVideoType('external')}
+                      >
+                        HeyGen / Externo
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={editVideoType === 'direct' ? 'default' : 'outline'}
+                        onClick={() => setEditVideoType('direct')}
+                      >
+                        Link Direto (MP4)
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={editVideoType === 'html_composition' ? 'default' : 'outline'}
+                        onClick={() => setEditVideoType('html_composition')}
+                      >
+                        HTML Composition
+                      </Button>
                     </div>
                   </div>
-                )}
+
+                  {editVideoType === 'html_composition' ? (
+                    <CompositionAdminEditor
+                      value={editCompositionJson}
+                      onChange={setEditCompositionJson}
+                      onValidChange={setEditCompositionValid}
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      <Label>
+                        {editVideoType === 'youtube' ? 'URL do YouTube *' : 'URL do Vídeo *'}
+                      </Label>
+                      <Input
+                        placeholder={
+                          editVideoType === 'youtube'
+                            ? 'https://www.youtube.com/watch?v=...'
+                            : editVideoType === 'external'
+                              ? 'https://app.heygen.com/share/...'
+                              : 'https://storage.example.com/video.mp4'
+                        }
+                        value={editMediaUrl}
+                        onChange={(e) => setEditMediaUrl(e.target.value)}
+                      />
+                      {editVideoType !== 'youtube' && (
+                        <p className="text-xs text-muted-foreground">
+                          Cole a URL completa do vídeo. Para HeyGen, use o link de compartilhamento.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Preview — renders the SAME way the student will see it */}
+                <div className="mt-4 p-4 bg-muted/50 rounded-lg">
+                  <h4 className="text-sm font-medium mb-2">Pré-visualização</h4>
+                  <div className="aspect-video bg-black rounded overflow-hidden">
+                    {editVideoType === 'html_composition' ? (
+                      editCompositionValid ? (
+                        <CompositionPlayer composition={editCompositionValid} autoPlay={false} />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+                          Composição inválida — corrija o JSON para ver a pré-visualização.
+                        </div>
+                      )
+                    ) : editVideoType === 'youtube' ? (
+                      extractYoutubeId(editMediaUrl) ? (
+                        <iframe
+                          src={`https://www.youtube.com/embed/${extractYoutubeId(editMediaUrl)}`}
+                          className="w-full h-full"
+                          allowFullScreen
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+                          Cole uma URL válida do YouTube.
+                        </div>
+                      )
+                    ) : editMediaUrl.trim() ? (
+                      <video src={editMediaUrl} controls className="w-full h-full" />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+                        Cole a URL do vídeo.
+                      </div>
+                    )}
+                  </div>
+                </div>
               </TabsContent>
               
               <TabsContent value="transcript" className="m-0 space-y-4">

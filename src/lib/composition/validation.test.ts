@@ -125,4 +125,46 @@ describe("validateComposition", () => {
     const res = validateComposition("");
     expect(res.valid).toBe(false);
   });
+
+  it("rejects 'avatar' and 'custom' scene types (schema honesty)", () => {
+    const avatar = validateComposition({
+      ...MINIMAL,
+      scenes: [{ id: "a", start: 0, end: 1, type: "avatar" }],
+    });
+    expect(avatar.valid).toBe(false);
+
+    const custom = validateComposition({
+      ...MINIMAL,
+      scenes: [{ id: "c", start: 0, end: 1, type: "custom" }],
+    });
+    expect(custom.valid).toBe(false);
+  });
+
+  it("preserves optional pedagogical metadata on scenes", () => {
+    const res = validateComposition({
+      ...MINIMAL,
+      scenes: [
+        {
+          id: "s1",
+          start: 0,
+          end: 5,
+          type: "text",
+          content: { text: "hi" },
+          pedagogical: {
+            checkpoint: true,
+            requiresReflection: true,
+            teachingMoment: true,
+            difficultyLevel: "medium",
+          },
+        },
+      ],
+    });
+    expect(res.valid).toBe(true);
+    if (res.valid) {
+      expect(res.composition.scenes[0].pedagogical?.checkpoint).toBe(true);
+      expect(res.composition.scenes[0].pedagogical?.difficultyLevel).toBe(
+        "medium",
+      );
+    }
+  });
 });

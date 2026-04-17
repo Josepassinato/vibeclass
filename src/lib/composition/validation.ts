@@ -8,13 +8,14 @@ export type CompositionValidationResult =
   | { valid: true; composition: LessonComposition; errors: [] }
   | { valid: false; composition: null; errors: string[] };
 
+// Mirror of the runtime-supported scene types. Must stay aligned with
+// CompositionSceneRenderer's switch — adding here without a renderer
+// silently ships a broken feature.
 const VALID_SCENE_TYPES: readonly CompositionSceneType[] = [
   "text",
   "image",
-  "avatar",
-  "quiz_pause",
   "caption",
-  "custom",
+  "quiz_pause",
 ];
 
 const isObject = (value: unknown): value is Record<string, unknown> =>

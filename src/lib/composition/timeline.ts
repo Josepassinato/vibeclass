@@ -63,3 +63,26 @@ export function findUpcomingQuizPause(
   }
   return null;
 }
+
+/**
+ * Find the first scene with `pedagogical.checkpoint === true` whose start
+ * falls inside (fromTime, toTime]. Lets the player stop on pedagogical
+ * checkpoints (reflection prompts, tutor interventions) without conflating
+ * them with quiz pauses. Scenes that ARE quiz pauses are skipped here so
+ * the quiz-pause handler keeps ownership of that flow.
+ */
+export function findUpcomingCheckpoint(
+  composition: LessonComposition | null,
+  fromTime: number,
+  toTime: number,
+): CompositionScene | null {
+  if (!composition) return null;
+  for (const scene of composition.scenes) {
+    if (scene.type === "quiz_pause") continue;
+    if (!scene.pedagogical?.checkpoint) continue;
+    if (scene.start > fromTime && scene.start <= toTime) {
+      return scene;
+    }
+  }
+  return null;
+}

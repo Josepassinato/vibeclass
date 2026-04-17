@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findUpcomingCheckpoint,
   findUpcomingQuizPause,
   getActiveScenes,
   getNextSceneAfter,
@@ -66,5 +67,50 @@ describe("findUpcomingQuizPause", () => {
   it("requires start to be strictly greater than fromTime", () => {
     // fromTime exactly at the pause's start should NOT re-detect it
     expect(findUpcomingQuizPause(COMP, 12, 13)).toBeNull();
+  });
+});
+
+describe("findUpcomingCheckpoint", () => {
+  const PED: LessonComposition = {
+    version: "1.0",
+    duration: 30,
+    scenes: [
+      { id: "intro", start: 0, end: 5, type: "text", content: { text: "i" } },
+      {
+        id: "check",
+        start: 5,
+        end: 8,
+        type: "text",
+        content: { text: "stop" },
+        pedagogical: { checkpoint: true },
+      },
+      { id: "mid", start: 8, end: 12, type: "text", content: { text: "m" } },
+      {
+        id: "skip-quiz",
+        start: 12,
+        end: 12,
+        type: "quiz_pause",
+        content: { question: "?" },
+        pedagogical: { checkpoint: true },
+      },
+    ],
+  };
+
+  it("detects a pedagogical checkpoint crossed within the tick", () => {
+    expect(findUpcomingCheckpoint(PED, 0, 5.1)?.id).toBe("check");
+  });
+
+  it("ignores scenes without pedagogical.checkpoint", () => {
+    expect(findUpcomingCheckpoint(COMP, 0, 30)).toBeNull();
+  });
+
+  it("does NOT treat a quiz_pause as a checkpoint, even if flagged", () => {
+    // The flagged quiz_pause at t=12 should not be returned — quiz pauses
+    // have their own handler and must not be double-fired.
+    expect(findUpcomingCheckpoint(PED, 11, 13)).toBeNull();
+  });
+
+  it("requires start to be strictly greater than fromTime (no re-fire)", () => {
+    expect(findUpcomingCheckpoint(PED, 5, 10)).toBeNull();
   });
 });

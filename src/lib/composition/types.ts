@@ -3,13 +3,21 @@
  * lesson. Kept intentionally small for MVP; evolves additively.
  */
 
+/**
+ * Scene types that are ACTUALLY implemented by CompositionSceneRenderer.
+ * Do not add an entry here until the renderer supports it — a declared-but-
+ * unrendered type is a silent product bug. See `roadmap` below for types
+ * that are intentionally deferred.
+ *
+ * Roadmap (not yet implemented — do NOT add to the union):
+ *   - "avatar": HeyGen/Tavus avatar streaming inside a scene
+ *   - "custom": opaque escape hatch for user HTML
+ */
 export type CompositionSceneType =
   | "text"
   | "image"
-  | "avatar"
-  | "quiz_pause"
   | "caption"
-  | "custom";
+  | "quiz_pause";
 
 export type CompositionAnimation = {
   /** Name of the enter transition. Mapped by `animationMap` in the renderer. */
@@ -53,7 +61,40 @@ export type CaptionSceneContent = {
   text: string;
 };
 
-export type CustomSceneContent = Record<string, unknown>;
+/**
+ * Pedagogical metadata — optional per-scene hooks that turn the composition
+ * from a visual timeline into a lesson-orchestration engine. Consumed by the
+ * CompositionPlayer (pauses on checkpoints) and surfaced to the tutor so it
+ * can decide when to intervene, offer reflection prompts, or defer.
+ *
+ * All fields are OPTIONAL and opt-in. Scenes without `pedagogical` behave
+ * exactly as before (backward compatible).
+ */
+export type CompositionPedagogy = {
+  /**
+   * When true, the player pauses on scene enter and stays paused until the
+   * user (or the tutor) explicitly resumes. Use for "stop and think"
+   * moments that are not full quiz pauses.
+   */
+  checkpoint?: boolean;
+  /**
+   * Signals that the scene expects a reflective answer before continuing.
+   * Tutor may prompt the learner and wait for a verbal/text response.
+   */
+  requiresReflection?: boolean;
+  /**
+   * If false, the tutor must NOT speak over this scene (e.g. a carefully
+   * timed visual explanation). Defaults to true when omitted.
+   */
+  tutorInterruptAllowed?: boolean;
+  /**
+   * Marks the scene as a teaching moment — the tutor should treat it as an
+   * opportunity to summarize, check understanding, or add context.
+   */
+  teachingMoment?: boolean;
+  /** Cognitive load hint so downstream systems can adjust pacing/quizzes. */
+  difficultyLevel?: "low" | "medium" | "high";
+};
 
 export type CompositionScene = {
   id: string;
@@ -66,11 +107,12 @@ export type CompositionScene = {
     | TextSceneContent
     | ImageSceneContent
     | QuizPauseSceneContent
-    | CaptionSceneContent
-    | CustomSceneContent;
+    | CaptionSceneContent;
   animation?: CompositionAnimation;
   position?: CompositionPosition;
   style?: Record<string, string | number>;
+  /** Optional pedagogical hooks — see CompositionPedagogy. */
+  pedagogical?: CompositionPedagogy;
 };
 
 export type LessonComposition = {

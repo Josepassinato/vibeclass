@@ -17,6 +17,7 @@ import { CompositionPlayer } from './CompositionPlayer';
 import type { UnifiedLessonPlayerHandle } from '@/lib/players/unified-player';
 import { validateComposition } from '@/lib/composition/validation';
 import type { LessonComposition } from '@/lib/composition/types';
+import { getLessonIdentity } from '@/lib/lesson-identity';
 import { VoiceIndicator } from './VoiceIndicator';
 import { ProcessingIndicator } from './ProcessingIndicator';
 import { MiniQuiz } from './MiniQuiz';
@@ -195,30 +196,49 @@ export function VoiceChat({ videoContext, videoId, videoUrl, videoType, composit
 
   const isComposition = videoType === 'html_composition' && parsedComposition !== null;
   const isDirectVideo = videoType === 'direct' || videoType === 'external';
-  // Determine if we have a lesson to display (any media kind)
-  const hasVideo = Boolean(videoId || videoUrl || isComposition);
 
-  // Load pre-configured moments or analyze content when video changes
+  // Canonical lesson identity. Use this — NEVER `videoId || videoUrl` — to
+  // key per-lesson caches, analysis, or dedupe state. Composition lessons
+  // legitimately have neither videoId nor videoUrl.
+  const lessonIdentity = useMemo(
+    () =>
+      getLessonIdentity({
+        id: videoDbId ?? null,
+        video_type: videoType ?? null,
+        youtube_id: videoId ?? null,
+        video_url: videoUrl ?? null,
+      }),
+    [videoDbId, videoType, videoId, videoUrl]
+  );
+
+  // We can show a lesson if identity is resolvable AND, for composition, the
+  // JSON payload validated. For video modes identity alone is sufficient.
+  const hasVideo = isComposition
+    ? true
+    : lessonIdentity !== null && (Boolean(videoId) || Boolean(videoUrl));
+
+  // Load pre-configured moments or analyze content when the lesson changes.
+  // Keyed on the canonical sourceKey so composition lessons also trigger
+  // analysis — previously the gate used `videoId || videoUrl`, which is
+  // always empty for composition, so teaching moments never initialized.
   useEffect(() => {
-    const videoKey = videoId || videoUrl;
-    if (videoKey && analyzedVideoRef.current !== videoKey) {
-      analyzedVideoRef.current = videoKey;
-      // Use pre-configured moments if available, otherwise analyze and auto-save
-      // Pass videoDbId for auto-save, and duration (default 10 min)
+    const analysisKey = lessonIdentity?.sourceKey ?? null;
+    if (analysisKey && analyzedVideoRef.current !== analysisKey) {
+      analyzedVideoRef.current = analysisKey;
       analyzeContent(
-        videoTranscript || null, 
-        videoTitle || '', 
-        videoContext, 
+        videoTranscript || null,
+        videoTitle || '',
+        videoContext,
         preConfiguredMoments,
-        undefined, // videoDurationMinutes - will use default
-        videoDbId, // Pass database ID for auto-saving
-        true // autoSave enabled
+        undefined,
+        videoDbId,
+        true
       );
       lastCheckedMomentRef.current = -1;
       setActiveMoment(null);
       setActiveQuiz(null);
     }
-  }, [videoId, videoUrl, videoDbId, videoTranscript, videoContext, videoTitle, preConfiguredMoments, analyzeContent]);
+  }, [lessonIdentity, videoDbId, videoTranscript, videoContext, videoTitle, preConfiguredMoments, analyzeContent]);
 
   // Load timestamp quizzes when videoDbId changes
   useEffect(() => {
@@ -1099,6 +1119,16 @@ INSTRUÇÕES:
                   onPause={handleManualPause}
                   onSeek={handleManualSeek}
                   onEnded={handleVideoEnded}
+                  onCheckpoint={(scene) => {
+                    // Pedagogical checkpoint: playback is already paused by
+                    // the player. Log for now; a follow-up phase will route
+                    // this to the tutor (reflection prompt / intervention).
+                    logger.debug('[VoiceChat] Composition checkpoint hit:', {
+                      sceneId: scene.id,
+                      at: scene.start,
+                      pedagogical: scene.pedagogical,
+                    });
+                  }}
                 />
               ) : isDirectVideo && videoUrl ? (
                 <DirectVideoPlayer

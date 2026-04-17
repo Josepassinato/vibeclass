@@ -12,6 +12,7 @@ import type {
   LessonComposition,
 } from "@/lib/composition/types";
 import {
+  findUpcomingCheckpoint,
   findUpcomingQuizPause,
   getActiveScenes,
 } from "@/lib/composition/timeline";
@@ -34,6 +35,13 @@ export interface CompositionPlayerProps {
    * button that resumes automatically.
    */
   onQuizPause?: (scene: CompositionScene) => void;
+  /**
+   * Fired when a pedagogical checkpoint scene is entered. Playback is
+   * already paused — host (typically the tutor) decides when to resume
+   * via the ref's `play()` method. Distinct from quiz pauses: a checkpoint
+   * is a reflection / tutor-intervention moment, not a quiz prompt.
+   */
+  onCheckpoint?: (scene: CompositionScene) => void;
 }
 
 const activeIdsKey = (scenes: CompositionScene[]) =>
@@ -56,6 +64,7 @@ export const CompositionPlayer = forwardRef<
     onEnded,
     onTimeUpdate,
     onQuizPause,
+    onCheckpoint,
   },
   ref,
 ) {
@@ -139,6 +148,21 @@ export const CompositionPlayer = forwardRef<
           return;
         }
 
+        // Detect pedagogical checkpoints (non-quiz scenes with pedagogical.checkpoint).
+        // Clamp the clock to the checkpoint start so the host can decide when to
+        // resume — playback stays paused until `play()` is called externally.
+        const checkpoint = findUpcomingCheckpoint(composition, prev, next);
+        if (checkpoint) {
+          next = checkpoint.start;
+          timeRef.current = next;
+          recomputeActive(next);
+          onTimeUpdate?.(next);
+          pause();
+          onCheckpoint?.(checkpoint);
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
         if (next >= composition.duration) {
           next = composition.duration;
           timeRef.current = next;
@@ -165,7 +189,7 @@ export const CompositionPlayer = forwardRef<
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
     // composition dependency ensures we re-seed when composition changes.
-  }, [composition, pause, recomputeActive, onTimeUpdate, onQuizPause, onEnded]);
+  }, [composition, pause, recomputeActive, onTimeUpdate, onQuizPause, onCheckpoint, onEnded]);
 
   // Reset state when composition reference changes.
   useEffect(() => {
