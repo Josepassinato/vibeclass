@@ -58,8 +58,12 @@ test.describe('html_composition admin flow', () => {
     await page.waitForTimeout(800);
     await page.screenshot({ path: 'artifacts/04-preview-rendered.png', fullPage: true });
 
-    // 10. Assert the first scene text from the sample composition is visible
-    await expect(page.getByText(/welcome to the lesson/i)).toBeVisible({ timeout: 3000 });
+    // 10. Assert the first scene text from the sample composition is visible.
+    // The sample JSON also contains this string inside the textarea, so scope
+    // the assertion to <p> elements — only the TextScene renders as <p>.
+    await expect(
+      page.locator('p').filter({ hasText: /welcome to the lesson/i }).first(),
+    ).toBeVisible({ timeout: 3000 });
     await page.screenshot({ path: 'artifacts/05-first-scene-visible.png', fullPage: true });
   });
 });
