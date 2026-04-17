@@ -1,6 +1,35 @@
 # Memoria do Projeto - Vibeclass
 
-Ultima atualizacao: 2026-04-16
+Ultima atualizacao: 2026-04-17
+
+## 2026-04-17 — HTML Composition consolidada como lesson mode first-class
+
+Commit `9a452f4` — refactor(composition): first-class html_composition lesson mode.
+
+- Novo `src/lib/lesson-identity.ts` centraliza identidade de aula (LessonIdentity
+  + getLessonIdentity). Substitui o pattern `videoId || videoUrl` que quebrava
+  para composition lessons (que podem nao ter nenhum dos dois).
+- `VoiceChat` agora usa `lessonIdentity.sourceKey` como chave de analise —
+  composition lessons finalmente iniciam teaching moments.
+- Admin.tsx: edit dialog suporta os 4 modos (youtube/direct/external/
+  html_composition) com hidratacao, preview unificada, e integridade
+  (troca de modo limpa os campos antigos no banco).
+- Schema honesty: removidos `avatar` e `custom` do schema (nao implementados
+  no renderer). `caption` mantido pois e aliased para text.
+- Pedagogical metadata em CompositionScene: checkpoint, requiresReflection,
+  tutorInterruptAllowed, teachingMoment, difficultyLevel. Player pausa em
+  checkpoints e dispara `onCheckpoint`.
+- Migration `20260417183000_allow_html_composition_video_type.sql` drops
+  CHECK stale da migration `20260128155718` e recria incluindo
+  'html_composition'. Sem ela, inserts com esse modo eram rejeitados no DB.
+- Testes: +18 novos (12 lesson-identity + 4 findUpcomingCheckpoint + 2
+  schema/pedagogical). Full suite 121 pass, 1 pre-existing fail (Student
+  branding), zero regressao. Build verde.
+- Deploy: CI run `24581314257` success. Migration aplicada no Supabase.
+  Frontend rsync manual para /var/www/vibe-code/ e /var/www/vibe-whitelabel/.
+  Smoke: vibecode.12brain.org 200, whitelabel.12brain.org 200.
+
+## 2026-04-16 — Base inicial
 
 ## Escopo
 
