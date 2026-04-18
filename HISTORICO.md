@@ -1,5 +1,88 @@
 # HISTORICO — vid-teach-guide (Vibe Class)
 
+## 2026-04-18 — Isolamento multi-tenant em tabelas de conteúdo da Fábrica
+
+### Objetivo
+Preparar white-label pra escala (200-300 escolas). Antes: tabelas de conteúdo só tinham `project_id`, isolamento entre escolas era frágil e queries per-tenant caras. Agora: `organization_id` denormalizado + RLS por org.
+
+### Mudanças
+Migration `20260418180000_tenant_isolation_content_tables.sql`:
+- `organization_id` NULLABLE adicionado em `school_factory_documents`, `school_factory_tasks`, `school_factory_tutor_pack_versions` (FK → `saas_organizations`, ON DELETE CASCADE)
+- Backfill automático via JOIN com `school_factory_projects.organization_id`
+- Índices compostos `(organization_id, created_at|status)` pra queries per-tenant
+- RLS habilitada + policies:
+  - `SELECT` permitido quando `saas_is_org_member(organization_id)` (ou NULL, pra legado)
+  - `ALL` liberado pra `service_role` (edge functions continuam funcionando)
+- Trigger `sf_fill_organization_from_project`: BEFORE INSERT autopreenche `organization_id` a partir do project_id — garante que novas rows nunca ficam órfãs
+- Trigger `sf_sync_children_organization`: AFTER UPDATE em projects cascata mudança de org para filhos
+
+### Backfill observado
+- `school_factory_documents`: 21 rows, 18 com org, 3 NULL (órfãs de projetos antigos, legado aceito)
+- `school_factory_tasks`: 160 rows, 147 com org, 13 NULL
+- `school_factory_tutor_pack_versions`: 13 rows, 12 com org, 1 NULL
+- Tudo coerente com 3 projetos órfãos existentes no baseline
+
+### Risco / mitigação
+- RLS habilitada: só service_role pode gravar. Frontend (src/) NÃO faz query direta nessas tabelas — verificado via grep. Todas as chamadas passam por `school-factory` ou `embed-transcript` edge functions, que usam service_role. Nada quebra.
+- `organization_id` NULLABLE: evita falhar em dados legados. Num futuro quando tudo estiver limpo, dá pra apertar pra NOT NULL.
+
+### Teste
+- Criado projeto `Escola Smoke Tenant` via API — organization_id autopreenchido em project + documents (trigger OK)
+- Query direta via service_role confirma contagens acima
+- Edge function `school-factory create_project` segue funcionando pós-RLS
+
+---
+
+## 2026-04-18 — Fix upload PDF via signed URL (RLS storage)
+
+### Sintoma
+Admin preenchia formulário "Fábrica Autônoma de Escolas" + anexava PDFs, clicava "Criar Projeto da Escola" e via toast: `new row violates row-level security policy`. O projeto era criado (school-factory usa service_role), mas o upload dos PDFs pelo client falhava.
+
+### Causa
+Policy `School factory docs insert` em `storage.objects` exige `auth.role() = 'authenticated'`. O admin entra no painel com senha (não com Supabase Auth), logo é `anon` → policy bloqueia INSERT no bucket.
+
+### Fix aplicado
+1. Nova action `sign_upload_url` em `school-factory/index.ts` (service_role cria signed upload URL com TTL)
+2. `SchoolFactoryPanel.tsx` trocou `supabase.storage.upload()` direto por `callFactory('sign_upload_url')` + `supabase.storage.uploadToSignedUrl(path, token, file)`
+3. Policies de storage permanecem restritas a authenticated (segurança preservada — só quem tem senha admin consegue pedir signed URL via edge function)
+
+### Arquivos alterados
+- `supabase/functions/school-factory/index.ts` (+17 linhas, action nova antes de attach_documents)
+- `src/components/SchoolFactoryPanel.tsx` (upload loop refatorado)
+
+### Deploy
+- Edge function `school-factory` redeploy (--no-verify-jwt)
+- Frontend rebuild + rsync `dist/` → `/var/www/escola-12brain/`
+
+### Teste (Playwright)
+- `sign_upload_url` → HTTP 200, retorna `{path, token, signed_url}`
+- `PUT` com token → HTTP 200, `{"Key":"school-factory-docs/.../teste.pdf"}`
+
+## 2026-04-18 — Fix 401 painel admin/fábrica escolas (JWT ES256)
+
+### Sintoma
+Admin reportou erro ao cadastrar/configurar escola no painel white-label. Login do admin falhava com 401 quando havia sessão Supabase Auth ativa no navegador (e.g. logado como aluno).
+
+### Causa
+Projeto Supabase `emeeklwuvemhqiglsect` rotacionou chaves de auth para assinatura assimétrica **ES256**. O gateway de edge functions só valida **HS256** e retorna `401 UNAUTHORIZED_UNSUPPORTED_TOKEN_ALGORITHM` antes da função executar. O SDK `supabase.functions.invoke()` anexa automaticamente o JWT do usuário logado como `Authorization: Bearer`, então toda edge function com `verify_jwt = true` quebra para usuários autenticados.
+
+### Fix aplicado
+`verify_jwt = false` em `admin-videos` e `school-factory` em `supabase/config.toml`. Essas funções se auto-autenticam comparando senha no body (`password !== ADMIN_PASSWORD`), não dependem do JWT do gateway. Redeploy via `supabase functions deploy --no-verify-jwt`.
+
+### Arquivos alterados
+- `supabase/config.toml` (linhas 15-16, 33-34)
+
+### Deploy
+- `supabase functions deploy admin-videos --no-verify-jwt --project-ref emeeklwuvemhqiglsect` (v22)
+- `supabase functions deploy school-factory --no-verify-jwt --project-ref emeeklwuvemhqiglsect` (v33)
+
+### Teste
+Via Playwright, `fetch` a ambas as funções com header `Authorization: Bearer <JWT-ES256>` retornou HTTP 200. Antes do fix: 401.
+
+### Pendências / riscos conhecidos
+- Outras 17 edge functions ainda têm `verify_jwt = true`. Qualquer uma chamada do frontend por usuário logado vai falhar com o mesmo erro. Candidatos a fix similar: `content-manager`, `tutor-memory`, `quiz-generator`, `search-transcript`, `analyze-learning-patterns` (tudo que o aluno ou admin logado chama).
+- Fix definitivo real: atualizar o runtime do gateway ou voltar chaves para HS256 no dashboard Supabase (afeta todas sessões → força re-login geral).
+
 ## 2026-03-31 — Sistema de Memoria Longa e Aprendizado Continuo do Tutor
 
 ### O que foi feito

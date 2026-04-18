@@ -13,7 +13,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.admin-videos]
-verify_jwt = true
+verify_jwt = false
 
 [functions.content-manager]
 verify_jwt = true
@@ -31,7 +31,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.school-factory]
-verify_jwt = true
+verify_jwt = false
 
 [functions.export-sql]
 verify_jwt = false

@@ -342,12 +342,19 @@ export function SchoolFactoryPanel({ password }: SchoolFactoryPanelProps) {
       if (pdfFiles.length > 0) {
         const extractedDocs: Array<Record<string, unknown>> = [];
         for (const file of pdfFiles) {
-          const safeName = sanitizeFileName(file.name);
-          const path = `${projectId}/${Date.now()}-${safeName}`;
+          const sign = await callFactory({
+            action: 'sign_upload_url',
+            project_id: projectId,
+            file_name: file.name,
+          });
+          const path = String(sign?.path || '');
+          const token = String(sign?.token || '');
+          if (!path || !token) throw new Error('Falha ao assinar URL de upload do PDF');
+
           const { error: uploadError } = await supabase
             .storage
             .from('school-factory-docs')
-            .upload(path, file, { upsert: false, contentType: 'application/pdf' });
+            .uploadToSignedUrl(path, token, file, { contentType: 'application/pdf' });
           if (uploadError) throw uploadError;
 
           const extractedText = await extractPdfText(file);

@@ -2408,6 +2408,24 @@ serve(async (req) => {
       });
     }
 
+    if (action === "sign_upload_url") {
+      const projectId = String(body.project_id || "");
+      const fileName = String(body.file_name || "").trim();
+      if (!projectId) return toJsonResponse({ error: "project_id é obrigatório" }, 400);
+      if (!fileName) return toJsonResponse({ error: "file_name é obrigatório" }, 400);
+      const safeName = fileName.replace(/[^\w.\-]+/g, "_").slice(0, 180);
+      const path = `${projectId}/${Date.now()}-${safeName}`;
+      const { data, error } = await supabase.storage
+        .from("school-factory-docs")
+        .createSignedUploadUrl(path);
+      if (error) throw error;
+      return toJsonResponse({
+        path,
+        token: data.token,
+        signed_url: data.signedUrl,
+      });
+    }
+
     if (action === "attach_documents") {
       const projectId = String(body.project_id || "");
       if (!projectId) return toJsonResponse({ error: "project_id é obrigatório" }, 400);
